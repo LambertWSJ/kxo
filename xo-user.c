@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/select.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "game.h"
@@ -32,6 +33,16 @@ static bool status_check(void)
     }
     fclose(fp);
     return true;
+}
+
+static void show_now()
+{
+    time_t timer;
+    time(&timer);
+    const struct tm *tm_info;
+    tm_info = localtime(&timer);
+    printf("\t\t\t%02d:%02d:%02d\n", tm_info->tm_hour, tm_info->tm_min,
+           tm_info->tm_sec);
 }
 
 static struct termios orig_termios;
@@ -120,6 +131,7 @@ int main(int argc, char *argv[])
             display_buf[DRAWBUFFER_SIZE - 1] = '\0';
             printf("%s", display_buf);
         }
+        show_now();
     }
 
     raw_mode_disable();
