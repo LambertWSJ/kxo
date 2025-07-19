@@ -446,7 +446,7 @@ static const struct file_operations kxo_fops = {
     .owner = THIS_MODULE,
 #endif
     .read = kxo_read,
-    .llseek = no_llseek,
+    .llseek = noop_llseek,
     .open = kxo_open,
     .release = kxo_release,
 };
