@@ -15,6 +15,9 @@
 #define XO_DEVICE_FILE "/dev/kxo"
 #define XO_DEVICE_ATTR_FILE "/sys/class/kxo/kxo/kxo_state"
 
+#define CTRL_P 16
+#define CTRL_Q 17
+
 static bool status_check(void)
 {
     FILE *fp = fopen(XO_STATUS_FILE, "r");
@@ -35,9 +38,9 @@ static bool status_check(void)
     return true;
 }
 
-static void show_now()
+static void print_now()
 {
-    time_t timer;
+    static time_t timer;
     time(&timer);
     const struct tm *tm_info;
     tm_info = localtime(&timer);
@@ -72,7 +75,7 @@ static void listen_keyboard_handler(void)
     if (read(STDIN_FILENO, &input, 1) == 1) {
         char buf[20];
         switch (input) {
-        case 16: /* Ctrl-P */
+        case CTRL_P:
             read(attr_fd, buf, 6);
             buf[0] = (buf[0] - '0') ? '0' : '1';
             read_attr ^= 1;
@@ -80,7 +83,7 @@ static void listen_keyboard_handler(void)
             if (!read_attr)
                 printf("\n\nStopping to display the chess board...\n");
             break;
-        case 17: /* Ctrl-Q */
+        case CTRL_Q:
             read(attr_fd, buf, 6);
             buf[4] = '1';
             read_attr = false;
@@ -131,7 +134,7 @@ int main(int argc, char *argv[])
             display_buf[sz] = '\0';
             printf("%s", display_buf);
         }
-        show_now();
+        print_now();
     }
 
     raw_mode_disable();
