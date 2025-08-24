@@ -2,7 +2,7 @@
 
 #include "game.h"
 
-static inline int eval_line_segment_score(const char *table,
+static inline int eval_line_segment_score(unsigned int table,
                                           char player,
                                           int i,
                                           int j,
@@ -10,8 +10,7 @@ static inline int eval_line_segment_score(const char *table,
 {
     int score = 0;
     for (int k = 0; k < GOAL; k++) {
-        char curr =
-            table[GET_INDEX(i + k * line.i_shift, j + k * line.j_shift)];
+        char curr = TABLE_GET_CELL(table, GET_INDEX(i, j));
         if (curr == player) {
             if (score < 0)
                 return 0;
@@ -19,7 +18,7 @@ static inline int eval_line_segment_score(const char *table,
                 score *= 10;
             else
                 score = 1;
-        } else if (curr != ' ') {
+        } else if (curr != CELL_EMPTY) {
             if (score > 0)
                 return 0;
             if (score)
@@ -31,7 +30,7 @@ static inline int eval_line_segment_score(const char *table,
     return score;
 }
 
-static inline int get_score(const char *table, char player)
+static inline int get_score(const unsigned int table, char player)
 {
     int score = 0;
     for (int i_line = 0; i_line < 4; ++i_line) {

@@ -120,11 +120,10 @@ static struct node *select_move(struct node *node)
     return best_node;
 }
 
-static fixed_point_t simulate(const char *table, char player)
+static fixed_point_t simulate(uint32_t table, char player)
 {
     char current_player = player;
-    char temp_table[N_GRIDS];
-    memcpy(temp_table, table, N_GRIDS);
+    uint32_t temp_table = table;
     xoro_jump(&(mcts_obj.xoro_obj));
     while (1) {
         int *moves = available_moves(temp_table);
@@ -137,11 +136,11 @@ static fixed_point_t simulate(const char *table, char player)
             ++n_moves;
         int move = moves[xoro_next(&(mcts_obj.xoro_obj)) % n_moves];
         kfree(moves);
-        temp_table[move] = current_player;
+        temp_table = VAL_SET_CELL(temp_table, move, current_player);
         char win;
-        if ((win = check_win(temp_table)) != ' ')
+        if ((win = check_win(temp_table)) != CELL_EMPTY)
             return calculate_win_value(win, player);
-        current_player ^= 'O' ^ 'X';
+        current_player ^= CELL_O ^ CELL_X;
     }
     return (fixed_point_t) (1UL << (FIXED_SCALE_BITS - 1));
 }
@@ -156,32 +155,32 @@ static void backpropagate(struct node *node, fixed_point_t score)
     }
 }
 
-static int expand(struct node *node, const char *table)
+static int expand(struct node *node, uint32_t table)
 {
     int *moves = available_moves(table);
     int n_moves = 0;
     while (n_moves < N_GRIDS && moves[n_moves] != -1)
         ++n_moves;
     for (int i = 0; i < n_moves; i++) {
-        node->children[i] = new_node(moves[i], node->player ^ 'O' ^ 'X', node);
+        node->children[i] =
+            new_node(moves[i], node->player ^ CELL_O ^ CELL_X, node);
     }
     kfree(moves);
     return n_moves;
 }
 
-int mcts(const char *table, char player)
+int mcts(uint32_t table, char player)
 {
     char win;
     struct node *root = new_node(-1, player, NULL);
     mcts_obj.nr_active_nodes = 1;
     for (int i = 0; i < ITERATIONS; i++) {
         struct node *node = root;
-        char temp_table[N_GRIDS];
-        memcpy(temp_table, table, N_GRIDS);
+        uint32_t temp_table = table;
         while (1) {
-            if ((win = check_win(temp_table)) != ' ') {
+            if ((win = check_win(temp_table)) != CELL_EMPTY) {
                 fixed_point_t score =
-                    calculate_win_value(win, node->player ^ 'O' ^ 'X');
+                    calculate_win_value(win, node->player ^ CELL_O ^ CELL_X);
                 backpropagate(node, score);
                 break;
             }
@@ -195,7 +194,8 @@ int mcts(const char *table, char player)
             node = select_move(node);
             if (!node)
                 return -1;
-            temp_table[node->move] = node->player ^ 'O' ^ 'X';
+            temp_table = VAL_SET_CELL(temp_table, node->move,
+                                      node->player ^ CELL_O ^ CELL_X);
         }
     }
     struct node *best_node = root;

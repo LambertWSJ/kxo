@@ -31,7 +31,6 @@ MODULE_DESCRIPTION("In-kernel Tic-Tac-Toe game engine");
 #define NR_KMLDRV 1
 
 static int delay = 100; /* time (in ms) to generate an event */
-
 /* Declare kernel module attribute for sysfs */
 
 struct kxo_attr {
@@ -77,8 +76,7 @@ static struct timer_list timer;
 static int major;
 static struct class *kxo_class;
 static struct cdev kxo_cdev;
-
-static char draw_buffer[DRAWBUFFER_SIZE];
+static uint32_t table;
 
 /* Data are stored into a kfifo buffer before passing them to the userspace */
 static DECLARE_KFIFO_PTR(rx_fifo, unsigned char);
@@ -95,10 +93,11 @@ static DECLARE_WAIT_QUEUE_HEAD(rx_wait);
 /* Insert the whole chess board into the kfifo buffer */
 static void produce_board(void)
 {
-    unsigned int len = kfifo_in(&rx_fifo, draw_buffer, sizeof(draw_buffer));
-    if (unlikely(len < sizeof(draw_buffer)))
+    unsigned int len =
+        kfifo_in(&rx_fifo, (unsigned char *) &table, sizeof(uint32_t));
+    if (unlikely(len < sizeof(uint32_t)))
         pr_warn_ratelimited("%s: %zu bytes dropped\n", __func__,
-                            sizeof(draw_buffer) - len);
+                            sizeof(table) - len);
 
     pr_debug("kxo: %s: in %u/%u bytes\n", __func__, len, kfifo_len(&rx_fifo));
 }
@@ -115,36 +114,6 @@ static DEFINE_MUTEX(consumer_lock);
  * interrupt context, before adding them to the kfifo.
  */
 static struct circ_buf fast_buf;
-
-static char table[N_GRIDS];
-
-/* Draw the board into draw_buffer */
-static int draw_board(char *table)
-{
-    int i = 0, k = 0;
-    draw_buffer[i++] = '\n';
-    smp_wmb();
-    draw_buffer[i++] = '\n';
-    smp_wmb();
-
-    while (i < DRAWBUFFER_SIZE) {
-        for (int j = 0; j < (BOARD_SIZE << 1) - 1 && k < N_GRIDS; j++) {
-            draw_buffer[i++] = j & 1 ? '|' : table[k++];
-            smp_wmb();
-        }
-        draw_buffer[i++] = '\n';
-        smp_wmb();
-        for (int j = 0; j < (BOARD_SIZE << 1) - 1; j++) {
-            draw_buffer[i++] = '-';
-            smp_wmb();
-        }
-        draw_buffer[i++] = '\n';
-        smp_wmb();
-    }
-
-
-    return 0;
-}
 
 /* Clear all data from the circular buffer fast_buf */
 static void fast_buf_clear(void)
@@ -177,10 +146,6 @@ static void drawboard_work_func(struct work_struct *w)
     }
     read_unlock(&attr_obj.lock);
 
-    mutex_lock(&producer_lock);
-    draw_board(table);
-    mutex_unlock(&producer_lock);
-
     /* Store data to the kfifo buffer */
     mutex_lock(&consumer_lock);
     produce_board();
@@ -207,12 +172,12 @@ static void ai_one_work_func(struct work_struct *w)
     tv_start = ktime_get();
     mutex_lock(&producer_lock);
     int move;
-    WRITE_ONCE(move, mcts(table, 'O'));
+    WRITE_ONCE(move, mcts(table, CELL_O));
 
     smp_mb();
 
     if (move != -1)
-        WRITE_ONCE(table[move], 'O');
+        WRITE_ONCE(table, VAL_SET_CELL(table, move, CELL_O));
 
     WRITE_ONCE(turn, 'X');
     WRITE_ONCE(finish, 1);
@@ -241,12 +206,12 @@ static void ai_two_work_func(struct work_struct *w)
     tv_start = ktime_get();
     mutex_lock(&producer_lock);
     int move;
-    WRITE_ONCE(move, negamax_predict(table, 'X').move);
+    WRITE_ONCE(move, negamax_predict(table, CELL_X).move);
 
     smp_mb();
 
     if (move != -1)
-        WRITE_ONCE(table[move], 'X');
+        table = VAL_SET_CELL(table, move, CELL_X);
 
     WRITE_ONCE(turn, 'O');
     WRITE_ONCE(finish, 1);
@@ -324,6 +289,7 @@ static void timer_handler(struct timer_list *__timer)
 {
     ktime_t tv_start, tv_end;
     s64 nsecs;
+    char cell_tlb[] = {'O', 'X'};
 
     pr_info("kxo: [CPU#%d] enter %s\n", smp_processor_id(), __func__);
     /* We are using a kernel timer to simulate a hard-irq, so we must expect
@@ -336,9 +302,9 @@ static void timer_handler(struct timer_list *__timer)
 
     tv_start = ktime_get();
 
-    char win = check_win(table);
+    uint8_t win = check_win(table);
 
-    if (win == ' ') {
+    if (win == CELL_EMPTY) {
         ai_game();
         mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
     } else {
@@ -347,10 +313,6 @@ static void timer_handler(struct timer_list *__timer)
             int cpu = get_cpu();
             pr_info("kxo: [CPU#%d] Drawing final board\n", cpu);
             put_cpu();
-
-            mutex_lock(&producer_lock);
-            draw_board(table);
-            mutex_unlock(&producer_lock);
 
             /* Store data to the kfifo buffer */
             mutex_lock(&consumer_lock);
@@ -361,14 +323,13 @@ static void timer_handler(struct timer_list *__timer)
         }
 
         if (attr_obj.end == '0') {
-            memset(table, ' ',
-                   N_GRIDS); /* Reset the table so the game restart */
+            table = 0; /* Reset the table so the game restart */
             mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
         }
 
         read_unlock(&attr_obj.lock);
 
-        pr_info("kxo: %c win!!!\n", win);
+        pr_info("kxo: %c win!!!\n", cell_tlb[win - 1]);
     }
     tv_end = ktime_get();
 
@@ -511,7 +472,7 @@ static int __init kxo_init(void)
 
     negamax_init();
     mcts_init();
-    memset(table, ' ', N_GRIDS);
+    table = 0;
     turn = 'O';
     finish = 1;
 

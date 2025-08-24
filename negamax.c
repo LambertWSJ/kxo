@@ -26,9 +26,13 @@ static int cmp_moves(const void *a, const void *b)
     return score_b - score_a;
 }
 
-static move_t negamax(char *table, int depth, char player, int alpha, int beta)
+static move_t negamax(unsigned int table,
+                      int depth,
+                      char player,
+                      int alpha,
+                      int beta)
 {
-    if (check_win(table) != ' ' || depth == 0) {
+    if (check_win(table) != CELL_EMPTY || depth == 0) {
         move_t result = {get_score(table, player), -1};
         return result;
     }
@@ -46,18 +50,19 @@ static move_t negamax(char *table, int depth, char player, int alpha, int beta)
     sort(moves, n_moves, sizeof(int), cmp_moves, NULL);
 
     for (int i = 0; i < n_moves; i++) {
-        table[moves[i]] = player;
-        hash_value ^= zobrist_table[moves[i]][player == 'X'];
+        table = VAL_SET_CELL(table, moves[i], player);
+
+        hash_value ^= zobrist_table[moves[i]][player == CELL_X];
         if (!i)
-            score = -negamax(table, depth - 1, player == 'X' ? 'O' : 'X', -beta,
+            score = -negamax(table, depth - 1, player ^ CELL_O ^ CELL_X, -beta,
                              -alpha)
                          .score;
         else {
-            score = -negamax(table, depth - 1, player == 'X' ? 'O' : 'X',
+            score = -negamax(table, depth - 1, player ^ CELL_O ^ CELL_X,
                              -alpha - 1, -alpha)
                          .score;
             if (alpha < score && score < beta)
-                score = -negamax(table, depth - 1, player == 'X' ? 'O' : 'X',
+                score = -negamax(table, depth - 1, player ^ CELL_O ^ CELL_X,
                                  -beta, -score)
                              .score;
         }
@@ -67,8 +72,8 @@ static move_t negamax(char *table, int depth, char player, int alpha, int beta)
             best_move.score = score;
             best_move.move = moves[i];
         }
-        table[moves[i]] = ' ';
-        hash_value ^= zobrist_table[moves[i]][player == 'X'];
+        table = VAL_SET_CELL(table, moves[i], CELL_EMPTY);
+        hash_value ^= zobrist_table[moves[i]][player == CELL_X];
         if (score > alpha)
             alpha = score;
         if (alpha >= beta)
@@ -86,7 +91,7 @@ void negamax_init(void)
     hash_value = 0;
 }
 
-move_t negamax_predict(char *table, char player)
+move_t negamax_predict(unsigned int table, char player)
 {
     memset(history_score_sum, 0, sizeof(history_score_sum));
     memset(history_count, 0, sizeof(history_count));

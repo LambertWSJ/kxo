@@ -9,5 +9,6 @@ struct mcts_info {
     int nr_active_nodes;
 };
 
-int mcts(const char *table, char player);
+// int mcts(const char *table, char player);
+int mcts(uint32_t table, char player);
 void mcts_init(void);

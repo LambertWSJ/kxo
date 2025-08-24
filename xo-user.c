@@ -18,6 +18,9 @@
 #define CTRL_P 16
 #define CTRL_Q 17
 
+static char display_buf[DRAWBUFFER_SIZE];
+static bool read_attr, end_attr;
+
 static bool status_check(void)
 {
     FILE *fp = fopen(XO_STATUS_FILE, "r");
@@ -46,6 +49,28 @@ static void print_now()
     tm_info = localtime(&timer);
     printf("\t\t\t%02d:%02d:%02d\n", tm_info->tm_hour, tm_info->tm_min,
            tm_info->tm_sec);
+}
+
+static int draw_board(unsigned int table)
+{
+    char cell_tlb[] = {' ', 'O', 'X'};
+    unsigned int i = 0, k = 0;
+    display_buf[i++] = '\n';
+    display_buf[i++] = '\n';
+    while (i < DRAWBUFFER_SIZE) {
+        for (int j = 0; j < (BOARD_SIZE << 1) - 1 && k < N_GRIDS; j++) {
+            display_buf[i++] =
+                j & 1 ? '|' : cell_tlb[TABLE_GET_CELL(table, k++)];
+        }
+
+        display_buf[i++] = '\n';
+        for (int j = 0; j < (BOARD_SIZE << 1) - 1; j++) {
+            display_buf[i++] = '-';
+        }
+        display_buf[i++] = '\n';
+    }
+
+    return 0;
 }
 
 static struct termios orig_termios;
@@ -101,11 +126,10 @@ int main(int argc, char *argv[])
     if (!status_check())
         exit(1);
 
+    memset(display_buf, 0, DRAWBUFFER_SIZE);
     raw_mode_enable();
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
-
-    char display_buf[DRAWBUFFER_SIZE];
 
     fd_set readset;
     int device_fd = open(XO_DEVICE_FILE, O_RDONLY);
@@ -129,12 +153,14 @@ int main(int argc, char *argv[])
             listen_keyboard_handler();
         } else if (read_attr && FD_ISSET(device_fd, &readset)) {
             FD_CLR(device_fd, &readset);
-            printf("\033[H\033[J"); /* ASCII escape code to clear the screen */
-            ssize_t sz = read(device_fd, display_buf, DRAWBUFFER_SIZE);
-            display_buf[sz] = '\0';
+            unsigned int table = 0;
+
+            read(device_fd, &table, sizeof(unsigned int));
+            draw_board(table);
             printf("%s", display_buf);
         }
         print_now();
+        printf("\033[H\033[J"); /* ASCII escape code to clear the screen */
     }
 
     raw_mode_disable();
