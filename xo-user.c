@@ -157,9 +157,15 @@ int main(int argc, char *argv[])
 
             read(device_fd, &table, sizeof(unsigned int));
             draw_board(table);
-            printf("%s", display_buf);
         }
+
+        printf("%s", display_buf);
         print_now();
+
+        if (!read_attr && !end_attr) {
+            printf("\n\nStopping to display the chess board...\n");
+            usleep(100);
+        }
         printf("\033[H\033[J"); /* ASCII escape code to clear the screen */
     }
 
