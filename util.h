@@ -10,7 +10,8 @@ static inline int eval_line_segment_score(unsigned int table,
 {
     int score = 0;
     for (int k = 0; k < GOAL; k++) {
-        char curr = TABLE_GET_CELL(table, GET_INDEX(i, j));
+        char curr = TABLE_GET_CELL(
+            table, GET_INDEX(i + k * line.i_shift, j + k * line.j_shift));
         if (curr == player) {
             if (score < 0)
                 return 0;
