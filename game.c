@@ -42,6 +42,9 @@ const line_t lines[4] = {
 
 char check_win(unsigned int table)
 {
+    if (!table)
+        return CELL_EMPTY;
+
     int len = ARRAY_SIZE(win_patterns);
     for (int i = 0; i < len; i++) {
         unsigned int patt = win_patterns[i];
@@ -73,9 +76,8 @@ int *available_moves(uint32_t table)
 {
     int *moves = kzalloc(N_GRIDS * sizeof(int), GFP_KERNEL);
     int m = 0;
-    for (int i = 0; i < N_GRIDS; i++)
-        if (TABLE_GET_CELL(table, i) == CELL_EMPTY)
-            moves[m++] = i;
+    for_each_empty_grid(i, table) moves[m++] = i;
+
     if (m < N_GRIDS)
         moves[m] = -1;
     return moves;
