@@ -42,6 +42,9 @@ const line_t lines[4] = {
 
 char check_win(unsigned int table)
 {
+    if (!table)
+        return CELL_EMPTY;
+
     int len = ARRAY_SIZE(win_patterns);
     for (int i = 0; i < len; i++) {
         unsigned int patt = win_patterns[i];

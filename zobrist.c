@@ -7,6 +7,7 @@ u64 zobrist_table[N_GRIDS][2];
 #define HASH(key) ((key) % HASH_TABLE_SIZE)
 
 static struct hlist_head *hash_table;
+static DEFINE_SPINLOCK(zorbist_lock);
 
 /* See https://github.com/wangyi-fudan/wyhash
  */
@@ -52,11 +53,14 @@ zobrist_entry_t *zobrist_get(u64 key)
         return NULL;
 
     zobrist_entry_t *entry = NULL;
-
+    spin_lock_bh(&zorbist_lock);
     hlist_for_each_entry(entry, &hash_table[hash_key], ht_list) {
-        if (entry->key == key)
+        if (entry->key == key) {
+            spin_unlock_bh(&zorbist_lock);
             return entry;
+        }
     }
+    spin_unlock_bh(&zorbist_lock);
     return NULL;
 }
 
@@ -67,11 +71,14 @@ void zobrist_put(u64 key, int score, int move)
     new_entry->key = key;
     new_entry->move = move;
     new_entry->score = score;
+    spin_lock_bh(&zorbist_lock);
     hlist_add_head(&new_entry->ht_list, &hash_table[hash_key]);
+    spin_unlock_bh(&zorbist_lock);
 }
 
 void zobrist_clear(void)
 {
+    spin_lock_bh(&zorbist_lock);
     for (int i = 0; i < HASH_TABLE_SIZE; i++) {
         while (!hlist_empty(&hash_table[i])) {
             zobrist_entry_t *entry =
@@ -81,4 +88,5 @@ void zobrist_clear(void)
         }
         INIT_HLIST_HEAD(&hash_table[i]);
     }
+    spin_unlock_bh(&zorbist_lock);
 }

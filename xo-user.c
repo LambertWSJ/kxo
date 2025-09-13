@@ -51,7 +51,7 @@ static void print_now()
            tm_info->tm_sec);
 }
 
-static int draw_board(unsigned int table)
+static int draw_board(const struct xo_table *xo_tlb)
 {
     char cell_tlb[] = {' ', 'O', 'X'};
     unsigned int i = 0, k = 0;
@@ -60,7 +60,7 @@ static int draw_board(unsigned int table)
     while (i < DRAWBUFFER_SIZE) {
         for (int j = 0; j < (BOARD_SIZE << 1) - 1 && k < N_GRIDS; j++) {
             display_buf[i++] =
-                j & 1 ? '|' : cell_tlb[TABLE_GET_CELL(table, k++)];
+                j & 1 ? '|' : cell_tlb[TABLE_GET_CELL(xo_tlb->table, k++)];
         }
 
         display_buf[i++] = '\n';
@@ -102,7 +102,7 @@ static void listen_keyboard_handler(void)
         switch (input) {
         case CTRL_P:
             read(attr_fd, buf, 6);
-            buf[0] = (buf[0] - '0') ? '0' : '1';
+            buf[0] = buf[0] ^ '0' ^ '1';
             read_attr ^= 1;
             write(attr_fd, buf, 6);
             if (!read_attr)
@@ -153,13 +153,20 @@ int main(int argc, char *argv[])
             listen_keyboard_handler();
         } else if (read_attr && FD_ISSET(device_fd, &readset)) {
             FD_CLR(device_fd, &readset);
-            unsigned int table = 0;
+            struct xo_table xo_tlb;
 
-            read(device_fd, &table, sizeof(unsigned int));
-            draw_board(table);
-            printf("%s", display_buf);
+            read(device_fd, &xo_tlb, sizeof(struct xo_table));
+            printf("GAME-%d\n", xo_tlb.id);
+            draw_board(&xo_tlb);
         }
+
+        printf("%s", display_buf);
         print_now();
+
+        if (!read_attr && !end_attr) {
+            printf("\n\nStopping to display the chess board...\n");
+            usleep(100);
+        }
         printf("\033[H\033[J"); /* ASCII escape code to clear the screen */
     }
 

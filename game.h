@@ -4,6 +4,7 @@
 #define GOAL 3
 #define ALLOW_EXCEED 1
 #define N_GRIDS (BOARD_SIZE * BOARD_SIZE)
+#define N_GAMES 8
 #define GET_INDEX(i, j) ((i) * (BOARD_SIZE) + (j))
 #define GET_COL(x) ((x) % BOARD_SIZE)
 #define GET_ROW(x) ((x) / BOARD_SIZE)
@@ -32,6 +33,11 @@ typedef struct {
     int i_shift, j_shift;
     int i_lower_bound, j_lower_bound, i_upper_bound, j_upper_bound;
 } line_t;
+
+struct xo_table {
+    int id;
+    unsigned int table;
+};
 
 /* Self-defined fixed-point type, using last 10 bits as fractional bits,
  * starting from lsb */
