@@ -102,14 +102,6 @@ static void produce_board(const struct xo_table *xo_tlb)
     pr_debug("kxo: %s: in %u/%u bytes\n", __func__, len, kfifo_len(&rx_fifo));
 }
 
-/* Mutex to serialize kfifo writers within the workqueue handler */
-static DEFINE_MUTEX(producer_lock);
-
-/* Mutex to serialize fast_buf consumers: we can use a mutex because consumers
- * run in workqueue handler (kernel thread context).
- */
-static DEFINE_MUTEX(consumer_lock);
-
 /* We use an additional "faster" circular buffer to quickly store data from
  * interrupt context, before adding them to the kfifo.
  */
@@ -147,9 +139,9 @@ static void drawboard_work_func(struct work_struct *w)
     read_unlock(&attr_obj.lock);
 
     /* Store data to the kfifo buffer */
-    mutex_lock(&consumer_lock);
+    mutex_lock(&game->lock);
     produce_board(&game->xo_tlb);
-    mutex_unlock(&consumer_lock);
+    mutex_unlock(&game->lock);
 
     wake_up_interruptible(&rx_wait);
 }
@@ -321,9 +313,9 @@ static void timer_handler(struct timer_list *__timer)
                 put_cpu();
 
                 /* Store data to the kfifo buffer */
-                mutex_lock(&consumer_lock);
+                mutex_lock(&game->lock);
                 produce_board(&game->xo_tlb);
-                mutex_unlock(&consumer_lock);
+                mutex_unlock(&game->lock);
 
                 wake_up_interruptible(&rx_wait);
             }
@@ -486,6 +478,7 @@ static int __init kxo_init(void)
 
     negamax_init();
     mcts_init();
+    fill_win_patterns();
 
     for (int i = 0; i < N_GAMES; i++) {
         struct ai_game *game = &games[i];
