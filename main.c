@@ -478,6 +478,7 @@ static int __init kxo_init(void)
 
     negamax_init();
     mcts_init();
+    fill_win_patterns();
 
     for (int i = 0; i < N_GAMES; i++) {
         struct ai_game *game = &games[i];

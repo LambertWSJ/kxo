@@ -8,6 +8,7 @@
 #define GET_INDEX(i, j) ((i) * (BOARD_SIZE) + (j))
 #define GET_COL(x) ((x) % BOARD_SIZE)
 #define GET_ROW(x) ((x) / BOARD_SIZE)
+#define WIN_PATT_LEN(n, goal) (2 * (n - goal + 1) * (n + (n - goal + 1)))
 #define CELL_EMPTY 0u
 #define CELL_O 1u
 #define CELL_X 2u
@@ -59,3 +60,4 @@ extern const line_t lines[4];
 int *available_moves(unsigned int table);
 char check_win(unsigned int t);
 fixed_point_t calculate_win_value(char win, unsigned char player);
+void fill_win_patterns(void);
