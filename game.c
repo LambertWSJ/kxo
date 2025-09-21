@@ -4,6 +4,7 @@
 
 static const int winpat_len = WIN_PATT_LEN(BOARD_SIZE, GOAL);
 static u32 win_patterns[WIN_PATT_LEN(BOARD_SIZE, GOAL)];
+u8 xo_segment_lines[WIN_PATT_LEN(BOARD_SIZE, GOAL)][GOAL];
 
 const line_t lines[4] = {
     {0, 1, 0, 0, BOARD_SIZE, BOARD_SIZE - GOAL + 1},             // ROW
@@ -42,21 +43,20 @@ char check_win(unsigned int table)
 
 void fill_win_patterns(void)
 {
-    u8 win_line[GOAL];
-
     for (int i_line = 0, w = 0; i_line < BOARD_SIZE; ++i_line) {
         line_t line = lines[i_line];
-
         for (int i = line.i_lower_bound; i < line.i_upper_bound; ++i) {
             for (int j = line.j_lower_bound; j < line.j_upper_bound; ++j) {
-                win_line[0] = GET_INDEX(i, j);
+                xo_segment_lines[w][0] = GET_INDEX(i, j);
                 for (int k = 1; k < GOAL; k++) {
                     int id =
                         GET_INDEX(i + k * line.i_shift, j + k * line.j_shift);
-                    win_line[k] = id;
+                    xo_segment_lines[w][k] = id;
                 }
-                win_patterns[w++] =
-                    GEN_O_WINMASK(win_line[0], win_line[1], win_line[2]);
+                win_patterns[w] = GEN_O_WINMASK(xo_segment_lines[w][0],
+                                                xo_segment_lines[w][1],
+                                                xo_segment_lines[w][2]);
+                w++;
             }
         }
     }
