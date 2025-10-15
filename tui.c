@@ -222,7 +222,7 @@ void render_logo(char *logo)
         k++;
         gotoxy(x, k);
         size_t len = pos - beg;
-        outbuf_write(beg, len + 1);
+        outbuf_write(beg, len);
         beg += len + 1;
     } while (pos);
 
