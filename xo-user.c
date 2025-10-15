@@ -6,10 +6,10 @@
 #include <string.h>
 #include <sys/select.h>
 #include <termios.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "game.h"
+#include "tui.h"
 
 #define XO_STATUS_FILE "/sys/module/kxo/initstate"
 #define XO_DEVICE_FILE "/dev/kxo"
@@ -18,7 +18,6 @@
 #define CTRL_P 16
 #define CTRL_Q 17
 
-static char display_buf[DRAWBUFFER_SIZE];
 static bool read_attr, end_attr;
 
 static bool status_check(void)
@@ -39,38 +38,6 @@ static bool status_check(void)
     }
     fclose(fp);
     return true;
-}
-
-static void print_now()
-{
-    static time_t timer;
-    time(&timer);
-    const struct tm *tm_info;
-    tm_info = localtime(&timer);
-    printf("\t\t\t%02d:%02d:%02d\n", tm_info->tm_hour, tm_info->tm_min,
-           tm_info->tm_sec);
-}
-
-static int draw_board(const struct xo_table *xo_tlb)
-{
-    char cell_tlb[] = {' ', 'O', 'X'};
-    unsigned int i = 0, k = 0;
-    display_buf[i++] = '\n';
-    display_buf[i++] = '\n';
-    while (i < DRAWBUFFER_SIZE) {
-        for (int j = 0; j < (BOARD_SIZE << 1) - 1 && k < N_GRIDS; j++) {
-            display_buf[i++] =
-                j & 1 ? '|' : cell_tlb[TABLE_GET_CELL(xo_tlb->table, k++)];
-        }
-
-        display_buf[i++] = '\n';
-        for (int j = 0; j < (BOARD_SIZE << 1) - 1; j++) {
-            display_buf[i++] = '-';
-        }
-        display_buf[i++] = '\n';
-    }
-
-    return 0;
 }
 
 static struct termios orig_termios;
@@ -126,7 +93,6 @@ int main(int argc, char *argv[])
     if (!status_check())
         exit(1);
 
-    memset(display_buf, 0, DRAWBUFFER_SIZE);
     raw_mode_enable();
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
@@ -136,6 +102,13 @@ int main(int argc, char *argv[])
     int max_fd = device_fd > STDIN_FILENO ? device_fd : STDIN_FILENO;
     read_attr = true;
     end_attr = false;
+    char *logo = load_logo("logof.txt");
+    struct xo_table xo_tlb;
+    clean_screen();
+
+    render_logo(logo);
+    render_boards_temp(N_GAMES);
+    tui_init();
 
     while (!end_attr) {
         FD_ZERO(&readset);
@@ -153,26 +126,24 @@ int main(int argc, char *argv[])
             listen_keyboard_handler();
         } else if (read_attr && FD_ISSET(device_fd, &readset)) {
             FD_CLR(device_fd, &readset);
-            struct xo_table xo_tlb;
 
             read(device_fd, &xo_tlb, sizeof(struct xo_table));
-            printf("GAME-%d\n", xo_tlb.id);
-            draw_board(&xo_tlb);
+            save_xy();
+            update_table(&xo_tlb);
+            restore_xy();
         }
-
-        printf("%s", display_buf);
         print_now();
 
         if (!read_attr && !end_attr) {
             printf("\n\nStopping to display the chess board...\n");
             usleep(100);
         }
-        printf("\033[H\033[J"); /* ASCII escape code to clear the screen */
+        outbuf_flush();
     }
 
     raw_mode_disable();
     fcntl(STDIN_FILENO, F_SETFL, flags);
-
+    free(logo);
     close(device_fd);
 
     return 0;
