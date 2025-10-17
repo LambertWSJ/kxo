@@ -40,23 +40,6 @@ static bool status_check(void)
     return true;
 }
 
-static struct termios orig_termios;
-
-static void raw_mode_disable(void)
-{
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
-}
-
-static void raw_mode_enable(void)
-{
-    tcgetattr(STDIN_FILENO, &orig_termios);
-    atexit(raw_mode_disable);
-    struct termios raw = orig_termios;
-    raw.c_iflag &= ~IXON;
-    raw.c_lflag &= ~(ECHO | ICANON);
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-}
-
 static bool read_attr, end_attr;
 
 static void listen_keyboard_handler(void)
@@ -93,7 +76,7 @@ int main(int argc, char *argv[])
     if (!status_check())
         exit(1);
 
-    raw_mode_enable();
+    tui_init();
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 
@@ -108,7 +91,6 @@ int main(int argc, char *argv[])
 
     render_logo(logo);
     render_boards_temp(N_GAMES);
-    tui_init();
 
     while (!end_attr) {
         FD_ZERO(&readset);
@@ -141,7 +123,7 @@ int main(int argc, char *argv[])
         outbuf_flush();
     }
 
-    raw_mode_disable();
+    tui_quit();
     fcntl(STDIN_FILENO, F_SETFL, flags);
     free(logo);
     close(device_fd);

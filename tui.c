@@ -19,18 +19,19 @@
 #define DIVBY(n, b) !(n & (b - 1))
 #define ESC "\033"
 #define CLEAR_SCREEN ESC "[2J" ESC "[1;1H"
+#define ALT_BUF_ENABLE "\033[?1049h"
+#define ALT_BUF_DISABLE "\033[?1049l"
 #define HIDE_CURSOR ESC "[?25l"
 #define SHOW_CURSOR ESC "[?25h"
-#define RESET_COLOR ESC "[0m"
 #define SAVE_XY ESC "[s"
 #define RESTORE_XY ESC "[u"
 #define OUTBUF_SIZE 4096
 #define FLUSH_THRESHOLD 2048 /* Flush when half-full for optimal latency */
-#define RESET "\033[0m"
-#define RED "\033[31m"
-#define GREEN "\033[32m"
-#define o_ch GREEN "O" RESET
-#define x_ch RED "X" RESET
+#define COLOR_RESET "\033[0m"
+#define COLOR_RED "\033[31m"
+#define COLOR_GREEN "\033[32m"
+#define o_ch COLOR_GREEN "O" COLOR_RESET
+#define x_ch COLOR_RED "X" COLOR_RESET
 
 
 #define MIN_COLS 55
@@ -53,9 +54,26 @@ struct xo_tab *cur_tab;
 struct tui_ctl {
 };
 
+static struct termios orig_termios;
+
 /* Write-combining buffer for low-latency terminal output */
 #define OUTBUF_SIZE 4096
 #define FLUSH_THRESHOLD 2048 /* Flush when half-full for optimal latency */
+
+static void raw_mode_enable(void)
+{
+    tcgetattr(STDIN_FILENO, &orig_termios);
+
+    struct termios raw = orig_termios;
+    raw.c_iflag &= ~IXON;
+    raw.c_lflag &= ~(ECHO | ICANON);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+}
+
+static void raw_mode_disable(void)
+{
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+}
 
 static void safe_write(int fd, const void *buf, size_t count)
 {
@@ -181,9 +199,29 @@ static void gotoxy(int x, int y)
     outbuf_printf("\033[%d;%dH", y, x);
 }
 
+void disable_raw()
+{
+    outbuf_flush();
+    safe_write(STDOUT_FILENO, ALT_BUF_DISABLE, sizeof(ALT_BUF_DISABLE) - 1);
+    raw_mode_disable();
+}
+
 void tui_init()
 {
+    raw_mode_enable();
+    outbuf_write(ALT_BUF_ENABLE, strlen(ALT_BUF_ENABLE));
+    outbuf_write(CLEAR_SCREEN HIDE_CURSOR, strlen(CLEAR_SCREEN HIDE_CURSOR));
     outbuf_printf(HIDE_CURSOR);
+    outbuf_flush();
+
+    atexit(disable_raw);
+}
+
+void tui_quit(void)
+{
+    safe_write(STDOUT_FILENO, SHOW_CURSOR, sizeof(SHOW_CURSOR) - 1);
+    safe_write(STDOUT_FILENO, COLOR_RESET, sizeof(COLOR_RESET) - 1);
+    disable_raw();
 }
 
 void clean_screen()
