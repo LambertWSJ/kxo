@@ -8,10 +8,10 @@ struct frame {
     size_t len;
 };
 
-struct xo_tab {
-    char *title;
-    void *data;
-    void (*update_ctx)(void *data);
+enum tui_tab {
+    XO_TAB_RECORD,
+    XO_TAB_LOADAVG,
+    TAB_TOTLEN,
 };
 
 void tui_init();
@@ -43,3 +43,5 @@ void render_boards_temp(const int n);
 void render_test();
 
 void render_board(const struct xo_table *tlb, int n);
+
+void tui_update_tab(enum tui_tab);

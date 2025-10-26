@@ -16,9 +16,11 @@
 #include "game.h"
 #include "tui.h"
 
+#define max(a, b) ((a) > (b) ? (a) : (b))
 #define DIVBY(n, b) !(n & (b - 1))
 #define ESC "\033"
 #define CLEAR_SCREEN ESC "[2J" ESC "[1;1H"
+#define CLEAR_LINE ESC "[2K"
 #define ALT_BUF_ENABLE "\033[?1049h"
 #define ALT_BUF_DISABLE "\033[?1049l"
 #define HIDE_CURSOR ESC "[?25l"
@@ -40,6 +42,8 @@
 #define UI_COLS 3
 #define BOXCH_LEN 3
 
+#define TAB_CTX_BASEY 52
+#define TAB_LABEL_BASEY 49
 #define BOARD_W 35
 #define BOARD_H 13
 #define BOARD_BASEY 10
@@ -50,8 +54,16 @@ static struct {
     bool disabled; /* Emergency fallback when buffer management fails */
 } outbuf = {0};
 
-struct xo_tab *cur_tab;
-struct tui_ctl {
+static int tab_maxh = -1;
+
+struct xo_tab {
+    char *title;
+    int high;
+};
+
+static struct xo_tab tui_tabs[TAB_TOTLEN] = {
+    [XO_TAB_RECORD] = {.title = "Records", .high = 11},
+    [XO_TAB_LOADAVG] = {.title = "Load avg", .high = 12},
 };
 
 static struct termios orig_termios;
@@ -214,6 +226,9 @@ void tui_init()
     outbuf_printf(HIDE_CURSOR);
     outbuf_flush();
 
+    for (int i = 0; i < TAB_TOTLEN; i++)
+        tab_maxh = max(tab_maxh, tui_tabs[i].high);
+
     atexit(disable_raw);
 }
 
@@ -227,6 +242,11 @@ void tui_quit(void)
 void clean_screen()
 {
     outbuf_printf("\033[2J\033[H");
+}
+
+static void clean_line()
+{
+    outbuf_printf(CLEAR_LINE);
 }
 
 char *load_logo(const char *file)
@@ -274,7 +294,7 @@ void print_now()
     const struct tm *tm_info;
     time(&timer);
     tm_info = localtime(&timer);
-    gotoxy(46, 48);
+    gotoxy(50, 48);
     outbuf_printf("⏰%02d:%02d:%02d\n", tm_info->tm_hour, tm_info->tm_min,
                   tm_info->tm_sec);
 }
@@ -445,4 +465,121 @@ void update_table(const struct xo_table *xo_tlb)
     gotoxy(x + 12, y + 12);
     outbuf_printf("MCTS vs NEGA\n");
     outbuf_flush();
+}
+
+static void draw_tab_border(const int high)
+{
+    int x = 1;
+    const int w = 106;
+    for (int i = 0; i < tab_maxh + 1; i++) {
+        gotoxy(x, TAB_CTX_BASEY + i);
+        clean_line();
+    }
+
+    gotoxy(x, TAB_CTX_BASEY + high);
+    outbuf_write("╰", BOXCH_LEN);
+    gotoxy(x + w - 2, TAB_CTX_BASEY + high);
+    outbuf_write("╯", BOXCH_LEN);
+
+    for (int i = 0; i < high; i++) {
+        gotoxy(x, TAB_CTX_BASEY + i);
+        outbuf_write("│", BOXCH_LEN);
+        gotoxy(x + w - 2, TAB_CTX_BASEY + i);
+        outbuf_write("│", BOXCH_LEN);
+    }
+
+    gotoxy(x + 1, TAB_CTX_BASEY + high);
+    for (int i = 0; i < w - 3; i++)
+        outbuf_write("─", BOXCH_LEN);
+}
+
+static void xo_record(const enum tui_tab tab)
+{
+    draw_tab_border(tui_tabs[tab].high);
+}
+
+static void xo_loadavg(const enum tui_tab tab)
+{
+    draw_tab_border(tui_tabs[tab].high);
+}
+
+static void draw_tab_label(enum tui_tab tab)
+{
+    int x = 0;
+    int y = TAB_LABEL_BASEY;
+
+    gotoxy(x, y);
+    int n = 106;
+    int labelh = 3;
+    int tablen = x + 1;
+    /* draw tab label */
+    for (int i = 0; i < TAB_TOTLEN; i++) {
+        struct xo_tab *xtab = &tui_tabs[i];
+        size_t len = strlen(xtab->title);
+        len += 4;
+
+        for (int k = 0; k < labelh; k++) {
+            bool first_row = k == 0;
+            gotoxy(x + tablen, y + k);
+            if (k == 1) {
+                outbuf_printf("│ %s │", xtab->title);
+                continue;
+            }
+
+            for (int j = 0; j < len; j++) {
+                bool first_col = j == 0;
+                bool last_col = j == len - 1;
+                if (first_row) {
+                    if (first_col)
+                        outbuf_write("╭", BOXCH_LEN);
+                    else if (last_col)
+                        outbuf_write("╮", BOXCH_LEN);
+                    else
+                        outbuf_write("─", BOXCH_LEN);
+
+                } else {
+                    if (first_col) {
+                        if (i == 0)
+                            outbuf_write(i == tab ? "│" : "├", BOXCH_LEN);
+                        else
+                            outbuf_write(i == tab ? "┘" : "┴", BOXCH_LEN);
+
+
+                    } else if (last_col)
+                        outbuf_write(i == tab ? "└" : "┴", BOXCH_LEN);
+                    else {
+                        if (i == tab)
+                            outbuf_write(" ", 1);
+                        else
+                            outbuf_write("─", BOXCH_LEN);
+                    }
+                }
+            }
+        }
+        tablen += len;
+    }
+
+    /* draw last line border */
+    gotoxy(x + tablen, y + labelh - 1);
+    n -= tablen;
+    for (int i = 0; i < n; i++)
+        outbuf_write(i == n - 1 ? "╮" : "─", BOXCH_LEN);
+}
+
+void tui_update_tab(enum tui_tab tab)
+{
+    assert(tab < TAB_TOTLEN);
+    draw_tab_label(tab);
+    /* request data and render */
+
+    switch (tab) {
+    case XO_TAB_RECORD:
+        xo_record(tab);
+        break;
+    case XO_TAB_LOADAVG:
+        xo_loadavg(tab);
+        break;
+    default:
+        assert(0);
+    }
 }

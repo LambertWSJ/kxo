@@ -17,8 +17,13 @@
 
 #define CTRL_P 16
 #define CTRL_Q 17
+#define KEY_Q 113
+#define KEY_W 119
+#define LEFT_BRACKET 60
+#define RIGHT_BRACKET 63
 
 static bool read_attr, end_attr;
+enum tui_tab curtab;
 
 static bool status_check(void)
 {
@@ -66,6 +71,12 @@ static void listen_keyboard_handler(void)
             write(attr_fd, buf, 6);
             printf("\n\nStopping the kernel space tic-tac-toe game...\n");
             break;
+        case KEY_Q:
+            curtab = XO_TAB_RECORD;
+            break;
+        case KEY_W:
+            curtab = XO_TAB_LOADAVG;
+            break;
         }
     }
     close(attr_fd);
@@ -91,12 +102,13 @@ int main(int argc, char *argv[])
 
     render_logo(logo);
     render_boards_temp(N_GAMES);
-
+    curtab = XO_TAB_RECORD;
     while (!end_attr) {
         FD_ZERO(&readset);
         FD_SET(STDIN_FILENO, &readset);
         FD_SET(device_fd, &readset);
-
+        print_now();
+        tui_update_tab(curtab);
         int result = select(max_fd + 1, &readset, NULL, NULL, NULL);
         if (result < 0) {
             printf("Error with select system call\n");
@@ -114,7 +126,6 @@ int main(int argc, char *argv[])
             update_table(&xo_tlb);
             restore_xy();
         }
-        print_now();
 
         if (!read_attr && !end_attr) {
             printf("\n\nStopping to display the chess board...\n");
