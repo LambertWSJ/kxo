@@ -5,17 +5,6 @@
 #include <linux/workqueue.h>
 #include "game.h"
 
-
-#define SET_RECORD_CELL(reocrd, id, cell)                                 \
-    ({                                                                    \
-        __typeof__(id) _id = id;                                          \
-        (record & ~(3ull << (_id * 4)) | ((uint64_t) cell << (_id * 4))); \
-    })
-
-#define GET_RECORD_CELL(reocrd, id) \
-    (record & (0xfull << ((uint64_t) id * 4))) >> ((uint64_t) id * 4)
-
-
 struct ai_game {
     struct xo_table xo_tlb;
     char turn;

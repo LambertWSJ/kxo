@@ -3,6 +3,7 @@
 #include <poll.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,6 +61,8 @@ struct xo_tab {
     char *title;
     int high;
 };
+
+enum tui_tab prev_tab = TAB_TOTLEN;
 
 static struct xo_tab tui_tabs[TAB_TOTLEN] = {
     [XO_TAB_RECORD] = {.title = "Records", .high = 11},
@@ -393,7 +396,7 @@ void render_boards_temp(const int n)
 void update_table(const struct xo_table *xo_tlb)
 {
     const char *cell_tlb[] = {" ", o_ch, x_ch};
-    int id = xo_tlb->id;
+    int id = XO_ATTR_ID(xo_tlb->attr);
     unsigned int table = xo_tlb->table;
     int y = BOARD_BASEY + (id / UI_COLS) * (BOARD_H - 1);
 
@@ -467,10 +470,12 @@ void update_table(const struct xo_table *xo_tlb)
     outbuf_flush();
 }
 
-static void draw_tab_border(const int high)
+static void draw_tab_border(const enum tui_tab tab)
 {
     int x = 1;
     const int w = 106;
+    const int high = tui_tabs[tab].high;
+
     for (int i = 0; i < tab_maxh + 1; i++) {
         gotoxy(x, TAB_CTX_BASEY + i);
         clean_line();
@@ -493,14 +498,40 @@ static void draw_tab_border(const int high)
         outbuf_write("─", BOXCH_LEN);
 }
 
-static void xo_record(const enum tui_tab tab)
+static void xo_record(const enum tui_tab tab, const struct xo_table *tlb)
 {
-    draw_tab_border(tui_tabs[tab].high);
+    if (tab != prev_tab) {
+        draw_tab_border(tab);
+    }
+    prev_tab = tab;
+    unsigned long moves = tlb->moves;
+    int steps = XO_ATTR_STEPS(tlb->attr);
+    int id = XO_ATTR_ID(tlb->attr);
+    char xy[2];
+    int y = 53;
+    gotoxy(4, y);
+    for (int i = 0; i < N_GAMES; i++) {
+        outbuf_printf("GAME-%d: ", i);
+        gotoxy(4, y + i + 1);
+    }
+    int x = 11;
+    gotoxy(x, y + id);
+    outbuf_printf("%77s", " ");
+    gotoxy(x, y + id);
+    for (int i = 0; i < steps; i++) {
+        uint8_t mv = GET_RECORD_CELL(moves, i);
+        xy[0] = 'A' + (mv & 3);
+        xy[1] = '1' + (mv / BOARD_SIZE);
+        outbuf_printf(" %s %s", xy, i == steps - 1 ? " " : "🠮");
+    }
 }
 
-static void xo_loadavg(const enum tui_tab tab)
+static void xo_loadavg(const enum tui_tab tab, const struct xo_table *tlb)
 {
-    draw_tab_border(tui_tabs[tab].high);
+    if (tab != prev_tab) {
+        draw_tab_border(tab);
+    }
+    prev_tab = tab;
 }
 
 static void draw_tab_label(enum tui_tab tab)
@@ -548,9 +579,9 @@ static void draw_tab_label(enum tui_tab tab)
                     } else if (last_col)
                         outbuf_write(i == tab ? "└" : "┴", BOXCH_LEN);
                     else {
-                        if (i == tab)
+                        if (i == tab) {
                             outbuf_write(" ", 1);
-                        else
+                        } else
                             outbuf_write("─", BOXCH_LEN);
                     }
                 }
@@ -566,7 +597,7 @@ static void draw_tab_label(enum tui_tab tab)
         outbuf_write(i == n - 1 ? "╮" : "─", BOXCH_LEN);
 }
 
-void tui_update_tab(enum tui_tab tab)
+void tui_update_tab(enum tui_tab tab, const struct xo_table *tlb)
 {
     assert(tab < TAB_TOTLEN);
     draw_tab_label(tab);
@@ -574,10 +605,10 @@ void tui_update_tab(enum tui_tab tab)
 
     switch (tab) {
     case XO_TAB_RECORD:
-        xo_record(tab);
+        xo_record(tab, tlb);
         break;
     case XO_TAB_LOADAVG:
-        xo_loadavg(tab);
+        xo_loadavg(tab, tlb);
         break;
     default:
         assert(0);

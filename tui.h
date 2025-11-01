@@ -30,8 +30,6 @@ void outbuf_flush(void);
 
 void update_time();
 
-void update_tabs(struct xo_tab **tabs);
-
 void render_logo(char *logo);
 
 void clean_screen();
@@ -44,4 +42,4 @@ void render_test();
 
 void render_board(const struct xo_table *tlb, int n);
 
-void tui_update_tab(enum tui_tab);
+void tui_update_tab(enum tui_tab, const struct xo_table *tlb);

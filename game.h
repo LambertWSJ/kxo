@@ -13,18 +13,19 @@
 #define CELL_O 1u
 #define CELL_X 2u
 #define CELL_D 3u
+#define ATTR_MSK 0xfu
+#define XO_ATTR_ID(attr) (attr & ATTR_MSK)
+#define XO_ATTR_STEPS(attr) get_bits(attr, 0xf, 4)
+#define XO_SET_ATTR_STEPS(attr, type) set_bits(attr, type, 0xf, 0x4)
+#define SET_RECORD_CELL(moves, step, n) set_bits64(moves, step, 0xful, n * 4u)
+#define GET_RECORD_CELL(moves, id) get_bits64(moves, 0xful, id * 4u)
 
 #define GEN_O_WINMASK(a, b, c) \
     ((CELL_O << (a * 2)) | (CELL_O << (b * 2)) | (CELL_O << (c * 2)))
 
-#define VAL_SET_CELL(table, pos, cell) \
-    ((table & ~((3u) << ((pos) * 2))) | ((cell) << ((pos) * 2)))
+#define VAL_SET_CELL(table, pos, cell) set_bits(table, cell, 3, pos * 2)
 
-#define TABLE_GET_CELL(table, pos)          \
-    ({                                      \
-        __typeof__(pos) _pos = (pos) * 2;   \
-        ((table & (0b11 << _pos)) >> _pos); \
-    })
+#define TABLE_GET_CELL(table, pos) get_bits(table, 3, pos * 2)
 
 #define for_each_empty_grid(i, table) \
     for (int i = 0; i < N_GRIDS; i++) \
@@ -36,8 +37,9 @@ typedef struct {
 } line_t;
 
 struct xo_table {
-    int id;
+    int attr;
     unsigned int table;
+    unsigned long moves;
 };
 
 /* Self-defined fixed-point type, using last 10 bits as fractional bits,
@@ -58,3 +60,26 @@ int *available_moves(unsigned int table);
 char check_win(unsigned int t);
 fixed_point_t calculate_win_value(char win, unsigned char player);
 void fill_win_patterns(void);
+
+static inline int set_bits(int x, int value, int mask, int n)
+{
+    return (x & ~(mask << n)) | (value << n);
+}
+
+static inline unsigned int get_bits(unsigned int x, int mask, int n)
+{
+    return (x & (mask << n)) >> n;
+}
+
+static inline long set_bits64(unsigned long x,
+                              unsigned long value,
+                              unsigned long mask,
+                              int n)
+{
+    return (x & ~(mask << n)) | (value << n);
+}
+
+static inline unsigned int get_bits64(unsigned long x, long mask, int n)
+{
+    return (x & (mask << n)) >> n;
+}

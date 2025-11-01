@@ -117,6 +117,7 @@ static void fast_buf_clear(void)
 static void drawboard_work_func(struct work_struct *w)
 {
     int cpu;
+    int id;
     struct ai_game *game = container_of(w, struct ai_game, drawboard_work);
     /* This code runs from a kernel thread, so softirqs and hard-irqs must
      * be enabled.
@@ -128,7 +129,8 @@ static void drawboard_work_func(struct work_struct *w)
      * during the pr_info().
      */
     cpu = get_cpu();
-    pr_info("kxo: [CPU#%d] game-%d %s\n", cpu, game->xo_tlb.id, __func__);
+    id = XO_ATTR_ID(game->xo_tlb.attr);
+    pr_info("kxo: [CPU#%d] game-%d %s\n", cpu, id, __func__);
     put_cpu();
 
     read_lock(&attr_obj.lock);
@@ -153,13 +155,15 @@ static void ai_one_work_func(struct work_struct *w)
     struct ai_game *game = container_of(w, struct ai_game, ai_one_work);
     struct xo_table *xo_tlb = &game->xo_tlb;
     int cpu;
+    int attr = xo_tlb->attr;
     unsigned int table = xo_tlb->table;
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
 
     cpu = get_cpu();
-    pr_info("kxo: [CPU#%d] game-%d start doing %s\n", cpu, xo_tlb->id,
-            __func__);
+    int id = XO_ATTR_ID(attr);
+    int steps = XO_ATTR_STEPS(attr);
+    pr_info("kxo: [CPU#%d] game-%d start doing %s\n", cpu, id, __func__);
     tv_start = ktime_get();
     mutex_lock(&game->lock);
     int move;
@@ -167,18 +171,23 @@ static void ai_one_work_func(struct work_struct *w)
 
     smp_mb();
 
-    if (move != -1)
+    if (move != -1) {
         WRITE_ONCE(xo_tlb->table, VAL_SET_CELL(table, move, CELL_O));
+        WRITE_ONCE(xo_tlb->moves,
+                   SET_RECORD_CELL(xo_tlb->moves, move, steps++));
+        WRITE_ONCE(xo_tlb->attr, XO_SET_ATTR_STEPS(attr, steps));
+    }
 
     WRITE_ONCE(game->turn, 'X');
     WRITE_ONCE(game->finish, 1);
+    pr_info("[one]move: [%d, %x, %lx]\n", steps - 1, move, xo_tlb->moves);
     smp_wmb();
     mutex_unlock(&game->lock);
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
-    pr_info("kxo: [CPU#%d] game-%d %s completed in %llu usec\n", cpu,
-            xo_tlb->id, __func__, (unsigned long long) nsecs >> 10);
+    pr_info("kxo: [CPU#%d] game-%d %s completed in %llu usec\n", cpu, id,
+            __func__, (unsigned long long) nsecs >> 10);
     put_cpu();
 }
 
@@ -190,13 +199,15 @@ static void ai_two_work_func(struct work_struct *w)
     int cpu;
     struct ai_game *game = container_of(w, struct ai_game, ai_two_work);
     struct xo_table *xo_tlb = &game->xo_tlb;
+    unsigned int attr = xo_tlb->attr;
     unsigned int table = xo_tlb->table;
     WARN_ON_ONCE(in_softirq());
     WARN_ON_ONCE(in_interrupt());
 
     cpu = get_cpu();
-    pr_info("kxo: [CPU#%d] game-%d start doing %s\n", cpu, xo_tlb->id,
-            __func__);
+    int id = XO_ATTR_ID(attr);
+    int steps = XO_ATTR_STEPS(attr);
+    pr_info("kxo: [CPU#%d] game-%d start doing %s\n", cpu, id, __func__);
     tv_start = ktime_get();
     mutex_lock(&game->lock);
     int move;
@@ -204,18 +215,23 @@ static void ai_two_work_func(struct work_struct *w)
 
     smp_mb();
 
-    if (move != -1)
-        xo_tlb->table = VAL_SET_CELL(table, move, CELL_X);
+    if (move != -1) {
+        WRITE_ONCE(xo_tlb->table, VAL_SET_CELL(table, move, CELL_X));
+        WRITE_ONCE(xo_tlb->moves,
+                   SET_RECORD_CELL(xo_tlb->moves, move, steps++));
+        WRITE_ONCE(xo_tlb->attr, XO_SET_ATTR_STEPS(attr, steps));
+    }
 
     WRITE_ONCE(game->turn, 'O');
     WRITE_ONCE(game->finish, 1);
+    pr_info("[two]move: [%d, %x, %lx]\n", steps - 1, move, xo_tlb->moves);
     smp_wmb();
     mutex_unlock(&game->lock);
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
-    pr_info("kxo: [CPU#%d] game-%d %s completed in %llu usec\n", cpu,
-            xo_tlb->id, __func__, (unsigned long long) nsecs >> 10);
+    pr_info("kxo: [CPU#%d] game-%d %s completed in %llu usec\n", cpu, id,
+            __func__, (unsigned long long) nsecs >> 10);
     put_cpu();
 }
 
@@ -301,10 +317,11 @@ static void timer_handler(struct timer_list *__timer)
         struct ai_game *game = &games[i];
         struct xo_table *xo_tlb = &game->xo_tlb;
         uint8_t win = check_win(xo_tlb->table);
+        uint8_t id = XO_ATTR_ID(xo_tlb->attr);
         if (win == CELL_EMPTY)
             unfini |= (1u << i);
         else {
-            pr_info("kxo: game-%d %c win!!!\n", xo_tlb->id, cell_tlb[win - 1]);
+            pr_info("kxo: game-%d %c win!!!\n", id, cell_tlb[win - 1]);
 
             read_lock(&attr_obj.lock);
             if (attr_obj.display == '1') {
@@ -320,8 +337,11 @@ static void timer_handler(struct timer_list *__timer)
                 wake_up_interruptible(&rx_wait);
             }
 
-            if (attr_obj.end == '0')
-                game->xo_tlb.table = 0;
+            if (attr_obj.end == '0') {
+                xo_tlb->attr &= ATTR_MSK;
+                xo_tlb->table = 0;
+                xo_tlb->moves = 0;
+            }
 
             read_unlock(&attr_obj.lock);
         }
@@ -483,7 +503,7 @@ static int __init kxo_init(void)
     for (int i = 0; i < N_GAMES; i++) {
         struct ai_game *game = &games[i];
         game->xo_tlb.table = 0;
-        game->xo_tlb.id = i;
+        game->xo_tlb.attr = i; /* set game ID in attr */
         game->turn = 'O';
         game->finish = 1;
         mutex_init(&game->lock);
