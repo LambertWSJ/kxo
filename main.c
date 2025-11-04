@@ -87,6 +87,7 @@ static DECLARE_KFIFO_PTR(rx_fifo, unsigned char);
  * from the interrupt context, readers are serialized using this mutex.
  */
 static DEFINE_MUTEX(read_lock);
+static DEFINE_MUTEX(consumer_lock);
 
 /* Wait queue to implement blocking I/O from userspace */
 static DECLARE_WAIT_QUEUE_HEAD(rx_wait);
@@ -141,9 +142,9 @@ static void drawboard_work_func(struct work_struct *w)
     read_unlock(&attr_obj.lock);
 
     /* Store data to the kfifo buffer */
-    mutex_lock(&game->lock);
+    mutex_lock(&consumer_lock);
     produce_board(&game->xo_tlb);
-    mutex_unlock(&game->lock);
+    mutex_unlock(&consumer_lock);
 
     wake_up_interruptible(&rx_wait);
 }
