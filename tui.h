@@ -14,7 +14,7 @@ enum tui_tab {
     TAB_TOTLEN,
 };
 
-void tui_init();
+void tui_init(const int fd);
 
 void print_now();
 

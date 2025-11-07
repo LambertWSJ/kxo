@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -56,6 +57,7 @@ static struct {
 } outbuf = {0};
 
 static int tab_maxh = -1;
+static int device_fd;
 
 struct xo_tab {
     char *title;
@@ -66,11 +68,11 @@ enum tui_tab prev_tab = TAB_TOTLEN;
 
 static struct xo_tab tui_tabs[TAB_TOTLEN] = {
     [XO_TAB_RECORD] = {.title = "Records", .high = 11},
-    [XO_TAB_LOADAVG] = {.title = "Load avg", .high = 12},
+    [XO_TAB_LOADAVG] = {.title = "Load avg", .high = 10},
 };
 
 static struct termios orig_termios;
-
+static struct xo_avg xo_avgs[N_GAMES];
 /* Write-combining buffer for low-latency terminal output */
 #define OUTBUF_SIZE 4096
 #define FLUSH_THRESHOLD 2048 /* Flush when half-full for optimal latency */
@@ -214,6 +216,11 @@ static void gotoxy(int x, int y)
     outbuf_printf("\033[%d;%dH", y, x);
 }
 
+static void update_avg(int sig)
+{
+    ioctl(device_fd, XO_IO_LDAVG, xo_avgs);
+}
+
 void disable_raw()
 {
     outbuf_flush();
@@ -221,7 +228,7 @@ void disable_raw()
     raw_mode_disable();
 }
 
-void tui_init()
+void tui_init(const int fd)
 {
     raw_mode_enable();
     outbuf_write(ALT_BUF_ENABLE, strlen(ALT_BUF_ENABLE));
@@ -231,6 +238,16 @@ void tui_init()
 
     for (int i = 0; i < TAB_TOTLEN; i++)
         tab_maxh = max(tab_maxh, tui_tabs[i].high);
+    memset(xo_avgs, 0, sizeof(xo_avgs));
+
+    device_fd = fd;
+    signal(SIGALRM, update_avg);
+    struct itimerval timer;
+    timer.it_value.tv_sec = 0;
+    timer.it_value.tv_usec = 1;
+    timer.it_interval.tv_sec = 0;
+    timer.it_interval.tv_usec = 500000;
+    setitimer(ITIMER_REAL, &timer, NULL);
 
     atexit(disable_raw);
 }
@@ -528,10 +545,21 @@ static void xo_record(const enum tui_tab tab, const struct xo_table *tlb)
 
 static void xo_loadavg(const enum tui_tab tab, const struct xo_table *tlb)
 {
-    if (tab != prev_tab) {
+    if (tab != prev_tab)
         draw_tab_border(tab);
-    }
     prev_tab = tab;
+    int y = 52;
+
+    gotoxy(17, y);
+    outbuf_printf("Load avg 1min             %s                         %s",
+                  o_ch, x_ch);
+    for (int i = 0; i < N_GAMES; i++) {
+        gotoxy(20, y + i + 1);
+        outbuf_printf(
+            "Game-%d               %d.%02d                      %d.%02d", i,
+            (xo_avgs[i].avg_o & 0x780) >> 7, xo_avgs[i].avg_o & 0x7f,
+            (xo_avgs[i].avg_x & 0x780) >> 7, xo_avgs[i].avg_x & 0x7f);
+    }
 }
 
 static void draw_tab_label(enum tui_tab tab)

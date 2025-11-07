@@ -5,6 +5,13 @@
 #include <linux/workqueue.h>
 #include "game.h"
 
+struct ai_avg {
+    s64 nsecs_o;
+    s64 nsecs_x;
+    u64 load_avg_o;
+    u64 load_avg_x;
+};
+
 struct ai_game {
     struct xo_table xo_tlb;
     char turn;

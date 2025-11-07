@@ -1,5 +1,7 @@
 #pragma once
 
+#include <linux/ioctl.h>
+
 #define BOARD_SIZE 4
 #define GOAL 3
 #define ALLOW_EXCEED 1
@@ -19,6 +21,8 @@
 #define XO_SET_ATTR_STEPS(attr, type) set_bits(attr, type, 0xf, 0x4)
 #define SET_RECORD_CELL(moves, step, n) set_bits64(moves, step, 0xful, n * 4u)
 #define GET_RECORD_CELL(moves, id) get_bits64(moves, 0xful, id * 4u)
+#define XO_IOCTL_MAGIC 0xbeaf
+#define XO_IO_LDAVG _IOR(XO_IOCTL_MAGIC, 1, struct xo_avg[N_GAMES])
 
 #define GEN_O_WINMASK(a, b, c) \
     ((CELL_O << (a * 2)) | (CELL_O << (b * 2)) | (CELL_O << (c * 2)))
@@ -41,6 +45,12 @@ struct xo_table {
     unsigned int table;
     unsigned long moves;
 };
+
+struct xo_avg {
+    unsigned short avg_x;
+    unsigned short avg_o;
+};
+
 
 /* Self-defined fixed-point type, using last 10 bits as fractional bits,
  * starting from lsb */

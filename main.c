@@ -6,6 +6,7 @@
 #include <linux/interrupt.h>
 #include <linux/kfifo.h>
 #include <linux/module.h>
+#include <linux/sched/loadavg.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/version.h>
@@ -31,6 +32,7 @@ MODULE_DESCRIPTION("In-kernel Tic-Tac-Toe game engine");
 
 #define NR_KMLDRV 1
 
+static int avg_period = 500;
 static int delay = 100; /* time (in ms) to generate an event */
 /* Declare kernel module attribute for sysfs */
 
@@ -43,6 +45,8 @@ struct kxo_attr {
 
 static struct kxo_attr attr_obj;
 static struct ai_game games[N_GAMES];
+static struct ai_avg ai_avgs[N_GAMES];
+static struct xo_avg xo_avgs[N_GAMES];
 
 static ssize_t kxo_state_show(struct device *dev,
                               struct device_attribute *attr,
@@ -73,6 +77,7 @@ static DEVICE_ATTR_RW(kxo_state);
 
 /* Timer to simulate a periodic IRQ */
 static struct timer_list timer;
+static struct timer_list loadavg_timer;
 
 /* Character device stuff */
 static int major;
@@ -88,6 +93,7 @@ static DECLARE_KFIFO_PTR(rx_fifo, unsigned char);
  */
 static DEFINE_MUTEX(read_lock);
 static DEFINE_MUTEX(consumer_lock);
+static DEFINE_MUTEX(avg_lock);
 
 /* Wait queue to implement blocking I/O from userspace */
 static DECLARE_WAIT_QUEUE_HEAD(rx_wait);
@@ -187,6 +193,10 @@ static void ai_one_work_func(struct work_struct *w)
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
+    mutex_lock(&avg_lock);
+    ai_avgs[id].nsecs_o += nsecs;
+    mutex_unlock(&avg_lock);
+
     pr_info("kxo: [CPU#%d] game-%d %s completed in %llu usec\n", cpu, id,
             __func__, (unsigned long long) nsecs >> 10);
     put_cpu();
@@ -231,6 +241,10 @@ static void ai_two_work_func(struct work_struct *w)
     tv_end = ktime_get();
 
     nsecs = (s64) ktime_to_ns(ktime_sub(tv_end, tv_start));
+    mutex_lock(&avg_lock);
+    ai_avgs[id].nsecs_x += nsecs;
+    mutex_unlock(&avg_lock);
+
     pr_info("kxo: [CPU#%d] game-%d %s completed in %llu usec\n", cpu, id,
             __func__, (unsigned long long) nsecs >> 10);
     put_cpu();
@@ -295,6 +309,59 @@ static void ai_game(void)
     pr_info("kxo: [CPU#%d] doing AI game\n", smp_processor_id());
     pr_info("kxo: [CPU#%d] scheduling tasklet\n", smp_processor_id());
     tasklet_schedule(&game_tasklet);
+}
+
+static void loadavg_handler(struct timer_list *__timer)
+{
+    static ktime_t tv_end = 0;
+    ktime_t tv_start;
+    s64 delta;
+
+
+    tv_start = ktime_get();
+    if (!tv_end) {
+        tv_end = tv_start;
+        goto leave;
+    }
+
+    delta = ktime_to_ns(ktime_sub(tv_start, tv_end));
+    tv_end = tv_start;
+    mutex_lock(&avg_lock);
+    for (int i = 0; i < N_GAMES; i++) {
+        struct ai_avg *avg = &ai_avgs[i];
+        u64 ratio;
+        if (avg->nsecs_o) {
+            ratio = div64_u64(avg->nsecs_o * FIXED_1, delta);
+            pr_debug("kxo: avg->nsecs_o=%llu\n", avg->nsecs_o);
+            avg->load_avg_o = calc_load(avg->load_avg_o, EXP_1, ratio);
+            avg->nsecs_o = 0;
+        }
+
+        if (avg->nsecs_x) {
+            ratio = div64_u64(avg->nsecs_x * FIXED_1, delta);
+            pr_debug("kxo: avg->nsecs_x=%llu\n", avg->nsecs_x);
+            avg->load_avg_x = calc_load(avg->load_avg_x, EXP_1, ratio);
+            avg->nsecs_x = 0;
+        }
+
+        const u16 x_int = LOAD_INT(avg->load_avg_x);
+        const u16 x_frac = LOAD_FRAC(avg->load_avg_x);
+        const u16 o_int = LOAD_INT(avg->load_avg_o);
+        const u16 o_frac = LOAD_FRAC(avg->load_avg_o);
+
+        xo_avgs[i].avg_x = (x_int << 7) + (x_frac & 0x7f);
+        xo_avgs[i].avg_o = (o_int << 7) + (o_frac & 0x7f);
+
+        pr_debug(
+            "kxo[%d] avg_x = %d.%02d, avg_o = %d.%02d ! avg_x = %d.%02d, avg_o "
+            "= %d.%02d\n",
+            i, (xo_avgs[i].avg_x & 0x780) >> 7, xo_avgs[i].avg_x & 0x7f,
+            (xo_avgs[i].avg_o & 0x780) >> 7, xo_avgs[i].avg_o & 0x7f, x_int,
+            x_frac, o_int, o_frac);
+    }
+    mutex_unlock(&avg_lock);
+leave:
+    mod_timer(&loadavg_timer, jiffies + msecs_to_jiffies(avg_period));
 }
 
 static void timer_handler(struct timer_list *__timer)
@@ -407,11 +474,31 @@ static atomic_t open_cnt;
 static int kxo_open(struct inode *inode, struct file *filp)
 {
     pr_debug("kxo: %s\n", __func__);
-    if (atomic_inc_return(&open_cnt) == 1)
+    if (atomic_inc_return(&open_cnt) == 1) {
         mod_timer(&timer, jiffies + msecs_to_jiffies(delay));
+        mod_timer(&loadavg_timer, jiffies + msecs_to_jiffies(avg_period));
+    }
     pr_info("openm current cnt: %d\n", atomic_read(&open_cnt));
 
     return 0;
+}
+
+static long kxo_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+    long ret = 0;
+    if (!arg)
+        return -EFAULT;
+
+    switch (cmd) {
+    case XO_IO_LDAVG:
+        if (copy_to_user((void __user *) arg, xo_avgs, sizeof(xo_avgs)))
+            ret = -EFAULT;
+        break;
+    default:
+        ret = -EINVAL;
+    }
+
+    return ret;
 }
 
 static int kxo_release(struct inode *inode, struct file *filp)
@@ -419,6 +506,7 @@ static int kxo_release(struct inode *inode, struct file *filp)
     pr_debug("kxo: %s\n", __func__);
     if (atomic_dec_and_test(&open_cnt)) {
         del_timer_sync(&timer);
+        del_timer_sync(&loadavg_timer);
         flush_workqueue(kxo_workqueue);
         fast_buf_clear();
     }
@@ -436,6 +524,7 @@ static const struct file_operations kxo_fops = {
     .read = kxo_read,
     .llseek = noop_llseek,
     .open = kxo_open,
+    .unlocked_ioctl = kxo_ioctl,
     .release = kxo_release,
 };
 
@@ -512,6 +601,7 @@ static int __init kxo_init(void)
         INIT_WORK(&game->ai_two_work, ai_two_work_func);
         INIT_WORK(&game->drawboard_work, drawboard_work_func);
     }
+    memset(ai_avgs, 0, sizeof(ai_avgs));
 
     attr_obj.display = '1';
     attr_obj.resume = '1';
@@ -519,6 +609,7 @@ static int __init kxo_init(void)
     rwlock_init(&attr_obj.lock);
     /* Setup the timer */
     timer_setup(&timer, timer_handler, 0);
+    timer_setup(&loadavg_timer, loadavg_handler, 0);
     atomic_set(&open_cnt, 0);
 
     pr_info("kxo: registered new kxo device: %d,%d\n", major, 0);
@@ -544,6 +635,7 @@ static void __exit kxo_exit(void)
     dev_t dev_id = MKDEV(major, 0);
 
     del_timer_sync(&timer);
+    del_timer_sync(&loadavg_timer);
     tasklet_kill(&game_tasklet);
     flush_workqueue(kxo_workqueue);
     destroy_workqueue(kxo_workqueue);

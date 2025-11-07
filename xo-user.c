@@ -87,7 +87,6 @@ int main(int argc, char *argv[])
     if (!status_check())
         exit(1);
 
-    tui_init();
     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 
@@ -98,8 +97,9 @@ int main(int argc, char *argv[])
     end_attr = false;
     char *logo = load_logo("logof.txt");
     struct xo_table xo_tlb;
-    clean_screen();
+    tui_init(device_fd);
 
+    clean_screen();
     render_logo(logo);
     render_boards_temp(N_GAMES);
     curtab = XO_TAB_RECORD;
