@@ -398,9 +398,9 @@ static void timer_handler(struct timer_list *__timer)
                 put_cpu();
 
                 /* Store data to the kfifo buffer */
-                mutex_lock(&game->lock);
+                mutex_lock(&consumer_lock);
                 produce_board(&game->xo_tlb);
-                mutex_unlock(&game->lock);
+                mutex_unlock(&consumer_lock);
 
                 wake_up_interruptible(&rx_wait);
             }
