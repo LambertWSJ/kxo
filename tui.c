@@ -412,8 +412,14 @@ void render_boards_temp(const int n)
 
 void update_table(const struct xo_table *xo_tlb)
 {
+    const char *ai_name[XO_AI_TOT] = {
+        [XO_AI_MCTS] = "MCTS",
+        [XO_AI_NEGAMAX] = "NEGA",
+    };
     const char *cell_tlb[] = {" ", o_ch, x_ch};
     int id = XO_ATTR_ID(xo_tlb->attr);
+    int alg = XO_ATTR_AI_ALG(xo_tlb->attr);
+    const char *o_alg = ai_name[alg & 3], *x_alg = ai_name[alg >> 2];
     unsigned int table = xo_tlb->table;
     int y = BOARD_BASEY + (id / UI_COLS) * (BOARD_H - 1);
 
@@ -483,7 +489,7 @@ void update_table(const struct xo_table *xo_tlb)
     }
 
     gotoxy(x + 12, y + 12);
-    outbuf_printf("MCTS vs NEGA\n");
+    outbuf_printf("%s vs %s\n", o_alg, x_alg);
     outbuf_flush();
 }
 

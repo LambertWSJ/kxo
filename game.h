@@ -18,7 +18,10 @@
 #define ATTR_MSK 0xfu
 #define XO_ATTR_ID(attr) (attr & ATTR_MSK)
 #define XO_ATTR_STEPS(attr) get_bits(attr, 0xf, 4)
-#define XO_SET_ATTR_STEPS(attr, type) set_bits(attr, type, 0xf, 0x4)
+#define XO_ATTR_AI_ALG(attr) get_bits(attr, 0xf, 8)
+#define XO_SET_ATTR_STEPS(attr, steps) set_bits(attr, steps, 0xf, 0x4)
+#define XO_SET_ATTR_AI_ALG(attr, ai1, ai2) \
+    set_bits(attr, (ai1) | (ai2) << 2, 0xf, 0x8)
 #define SET_RECORD_CELL(moves, step, n) set_bits64(moves, step, 0xful, n * 4u)
 #define GET_RECORD_CELL(moves, id) get_bits64(moves, 0xful, id * 4u)
 #define XO_IOCTL_MAGIC 0xbeaf
@@ -41,7 +44,7 @@ typedef struct {
 } line_t;
 
 struct xo_table {
-    int attr;
+    unsigned int attr;
     unsigned int table;
     unsigned long moves;
 };
@@ -51,6 +54,11 @@ struct xo_avg {
     unsigned short avg_o;
 };
 
+enum {
+    XO_AI_MCTS,
+    XO_AI_NEGAMAX,
+    XO_AI_TOT,
+};
 
 /* Self-defined fixed-point type, using last 10 bits as fractional bits,
  * starting from lsb */

@@ -5,6 +5,8 @@
 #include <linux/workqueue.h>
 #include "game.h"
 
+typedef int (*ai_alg)(unsigned int table, char player);
+
 struct ai_avg {
     s64 nsecs_o;
     s64 nsecs_x;

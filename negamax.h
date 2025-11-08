@@ -5,4 +5,4 @@ typedef struct {
 } move_t;
 
 void negamax_init(void);
-move_t negamax_predict(unsigned int table, char player);
+int negamax_predict(unsigned int table, char player);

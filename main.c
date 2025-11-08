@@ -6,6 +6,7 @@
 #include <linux/interrupt.h>
 #include <linux/kfifo.h>
 #include <linux/module.h>
+#include <linux/random.h>
 #include <linux/sched/loadavg.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
@@ -47,6 +48,10 @@ static struct kxo_attr attr_obj;
 static struct ai_game games[N_GAMES];
 static struct ai_avg ai_avgs[N_GAMES];
 static struct xo_avg xo_avgs[N_GAMES];
+static ai_alg ai_algs[XO_AI_TOT] = {
+    [XO_AI_MCTS] = mcts,
+    [XO_AI_NEGAMAX] = negamax_predict,
+};
 
 static ssize_t kxo_state_show(struct device *dev,
                               struct device_attribute *attr,
@@ -174,7 +179,8 @@ static void ai_one_work_func(struct work_struct *w)
     tv_start = ktime_get();
     mutex_lock(&game->lock);
     int move;
-    WRITE_ONCE(move, mcts(table, CELL_O));
+    int alg = XO_ATTR_AI_ALG(attr) & 3;
+    WRITE_ONCE(move, ai_algs[alg](table, CELL_O));
 
     smp_mb();
 
@@ -222,7 +228,8 @@ static void ai_two_work_func(struct work_struct *w)
     tv_start = ktime_get();
     mutex_lock(&game->lock);
     int move;
-    WRITE_ONCE(move, negamax_predict(table, CELL_X).move);
+    int alg = XO_ATTR_AI_ALG(attr) >> 2;
+    WRITE_ONCE(move, ai_algs[alg](table, CELL_X));
 
     smp_mb();
 
@@ -384,8 +391,9 @@ static void timer_handler(struct timer_list *__timer)
     for (int i = 0; i < N_GAMES; i++) {
         struct ai_game *game = &games[i];
         struct xo_table *xo_tlb = &game->xo_tlb;
+        unsigned int attr = xo_tlb->attr;
         uint8_t win = check_win(xo_tlb->table);
-        uint8_t id = XO_ATTR_ID(xo_tlb->attr);
+        uint8_t id = XO_ATTR_ID(attr);
         if (win == CELL_EMPTY)
             unfini |= (1u << i);
         else {
@@ -406,7 +414,11 @@ static void timer_handler(struct timer_list *__timer)
             }
 
             if (attr_obj.end == '0') {
-                xo_tlb->attr &= ATTR_MSK;
+                u32 rnd = get_random_u32();
+                attr &= ATTR_MSK;
+                attr = XO_SET_ATTR_AI_ALG(attr, rnd % XO_AI_TOT,
+                                          (rnd >> 16) % XO_AI_TOT);
+                xo_tlb->attr = attr;
                 xo_tlb->table = 0;
                 xo_tlb->moves = 0;
             }
@@ -591,9 +603,14 @@ static int __init kxo_init(void)
     fill_win_patterns();
 
     for (int i = 0; i < N_GAMES; i++) {
+        unsigned int attr;
+        u32 rnd = get_random_u32();
         struct ai_game *game = &games[i];
         game->xo_tlb.table = 0;
-        game->xo_tlb.attr = i; /* set game ID in attr */
+        attr = i; /* set game ID in attr */
+        attr =
+            XO_SET_ATTR_AI_ALG(attr, rnd % XO_AI_TOT, (rnd >> 16) % XO_AI_TOT);
+        game->xo_tlb.attr = attr;
         game->turn = 'O';
         game->finish = 1;
         mutex_init(&game->lock);
