@@ -95,6 +95,7 @@ static void raw_mode_disable(void)
 static void safe_write(int fd, const void *buf, size_t count)
 {
     ssize_t result = write(fd, buf, count);
+    write(fd, COLOR_RESET, strlen(COLOR_RESET));
     /* In terminal context, write failures are usually due to
      * broken pipes or terminal issues - not critical for game logic
      */
