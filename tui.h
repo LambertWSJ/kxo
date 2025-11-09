@@ -43,3 +43,5 @@ void render_test();
 void render_board(const struct xo_table *tlb, int n);
 
 void tui_update_tab(enum tui_tab, const struct xo_table *tlb);
+
+void stop_message(bool stop);

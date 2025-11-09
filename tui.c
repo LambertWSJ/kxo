@@ -648,3 +648,41 @@ void tui_update_tab(enum tui_tab tab, const struct xo_table *tlb)
         assert(0);
     }
 }
+
+void stop_message(bool stop)
+{
+    int width = 13;
+    int high = 3;
+    int x = 1, y = 8;
+    gotoxy(x, y);
+    if (stop) {
+        for (int i = 0; i < high; i++) {
+            gotoxy(x, y + i);
+            if (i == 1) {
+                outbuf_printf("│  %s  │", COLOR_GREEN "STOPING" COLOR_RESET);
+                continue;
+            }
+            for (int j = 0; j < width; j++) {
+                bool is_verti_board = i != 0 && i != high - 1;
+                if (i == 0 && j == 0)
+                    outbuf_write("┌", BOXCH_LEN);
+                else if (i == 0 && j == width - 1)
+                    outbuf_write("┐", BOXCH_LEN);
+                else if (i == high - 1 && j == 0)
+                    outbuf_write("└", BOXCH_LEN);
+                else if (i == high - 1 && j == width - 1)
+                    outbuf_write("┘", BOXCH_LEN);
+                else if (is_verti_board && (j == 0 || j == width - 1))
+                    outbuf_write("│", BOXCH_LEN);
+                else
+                    outbuf_write("─", BOXCH_LEN);
+            }
+        }
+    } else {
+        /* clean stop message */
+        for (int i = 0; i < high; i++) {
+            gotoxy(x, y + i);
+            outbuf_printf("%13s", " ");
+        }
+    }
+}

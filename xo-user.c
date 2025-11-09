@@ -60,8 +60,6 @@ static void listen_keyboard_handler(void)
             buf[0] = buf[0] ^ '0' ^ '1';
             read_attr ^= 1;
             write(attr_fd, buf, 6);
-            if (!read_attr)
-                printf("\n\nStopping to display the chess board...\n");
             break;
         case CTRL_Q:
             read(attr_fd, buf, 6);
@@ -79,6 +77,7 @@ static void listen_keyboard_handler(void)
             break;
         }
     }
+    stop_message(!read_attr);
     close(attr_fd);
 }
 
@@ -128,10 +127,8 @@ int main(int argc, char *argv[])
             tui_update_tab(curtab, &xo_tlb);
         }
 
-        if (!read_attr && !end_attr) {
-            printf("\n\nStopping to display the chess board...\n");
+        if (!read_attr && !end_attr)
             usleep(100);
-        }
         outbuf_flush();
     }
 
