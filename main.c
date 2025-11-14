@@ -17,6 +17,8 @@
 #include "ai_game.h"
 #include "mcts.h"
 #include "negamax.h"
+#include "reinforcement_learning.h"
+#include "util.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -52,6 +54,10 @@ static ai_alg ai_algs[XO_AI_TOT] = {
     [XO_AI_MCTS] = mcts,
     [XO_AI_NEGAMAX] = negamax_predict,
 };
+
+rl_agent_t rl_agents[2];
+int episode_moves[N_GAMES][N_GRIDS] = {0};
+fixed_point_t reward[N_GAMES][N_GRIDS] = {0};
 
 static ssize_t kxo_state_show(struct device *dev,
                               struct device_attribute *attr,
@@ -180,20 +186,30 @@ static void ai_one_work_func(struct work_struct *w)
     mutex_lock(&game->lock);
     int move;
     int alg = XO_ATTR_AI_ALG(attr) & 3;
-    WRITE_ONCE(move, ai_algs[alg](table, CELL_O));
+    bool is_rl = alg == XO_AI_RL;
+    WRITE_ONCE(move, is_rl ? play_rl(&table, &rl_agents[0])
+                           : ai_algs[alg](table, CELL_O));
 
     smp_mb();
 
     if (move != -1) {
         WRITE_ONCE(xo_tlb->table, VAL_SET_CELL(table, move, CELL_O));
-        WRITE_ONCE(xo_tlb->moves,
-                   SET_RECORD_CELL(xo_tlb->moves, move, steps++));
-        WRITE_ONCE(xo_tlb->attr, XO_SET_ATTR_STEPS(attr, steps));
+        WRITE_ONCE(xo_tlb->moves, SET_RECORD_CELL(xo_tlb->moves, move, steps));
+
+        if (is_rl) {
+            table = xo_tlb->table;
+            u8 win = check_win(table);
+            episode_moves[id][steps] = table_to_hash(table);
+            fixed_point_t score = fixed_mul_s32((RL_FIXED_1 - REWARD_TRADEOFF),
+                                                get_score(table, CELL_O));
+            reward[id][steps] = score + calculate_win_value(win, CELL_O);
+        }
+        WRITE_ONCE(xo_tlb->attr, XO_SET_ATTR_STEPS(attr, steps + 1));
     }
 
     WRITE_ONCE(game->turn, 'X');
     WRITE_ONCE(game->finish, 1);
-    pr_info("[one]move: [%d, %x, %lx]\n", steps - 1, move, xo_tlb->moves);
+    pr_info("[one]move: [%d, %x, %lx]\n", steps, move, xo_tlb->moves);
     smp_wmb();
     mutex_unlock(&game->lock);
     tv_end = ktime_get();
@@ -229,20 +245,30 @@ static void ai_two_work_func(struct work_struct *w)
     mutex_lock(&game->lock);
     int move;
     int alg = XO_ATTR_AI_ALG(attr) >> 2;
-    WRITE_ONCE(move, ai_algs[alg](table, CELL_X));
+    bool is_rl = alg == XO_AI_RL;
+    WRITE_ONCE(move, is_rl ? play_rl(&table, &rl_agents[1])
+                           : ai_algs[alg](table, CELL_X));
 
     smp_mb();
 
     if (move != -1) {
         WRITE_ONCE(xo_tlb->table, VAL_SET_CELL(table, move, CELL_X));
-        WRITE_ONCE(xo_tlb->moves,
-                   SET_RECORD_CELL(xo_tlb->moves, move, steps++));
-        WRITE_ONCE(xo_tlb->attr, XO_SET_ATTR_STEPS(attr, steps));
+        WRITE_ONCE(xo_tlb->moves, SET_RECORD_CELL(xo_tlb->moves, move, steps));
+
+        if (is_rl) {
+            table = xo_tlb->table;
+            u8 win = check_win(table);
+            episode_moves[id][steps] = table_to_hash(table);
+            fixed_point_t score = fixed_mul_s32((RL_FIXED_1 - REWARD_TRADEOFF),
+                                                get_score(table, CELL_X));
+            reward[id][steps] = score + calculate_win_value(win, CELL_X);
+        }
+        WRITE_ONCE(xo_tlb->attr, XO_SET_ATTR_STEPS(attr, steps + 1));
     }
 
     WRITE_ONCE(game->turn, 'O');
     WRITE_ONCE(game->finish, 1);
-    pr_info("[two]move: [%d, %x, %lx]\n", steps - 1, move, xo_tlb->moves);
+    pr_info("[two]move: [%d, %x, %lx]\n", steps, move, xo_tlb->moves);
     smp_wmb();
     mutex_unlock(&game->lock);
     tv_end = ktime_get();
@@ -397,7 +423,8 @@ static void timer_handler(struct timer_list *__timer)
         if (win == CELL_EMPTY)
             unfini |= (1u << i);
         else {
-            pr_info("kxo: game-%d %c win!!!\n", id, cell_tlb[win - 1]);
+            int winner = win - 1;
+            pr_info("kxo: game-%d %c win!!!\n", id, cell_tlb[winner]);
 
             read_lock(&attr_obj.lock);
             if (attr_obj.display == '1') {
@@ -414,6 +441,7 @@ static void timer_handler(struct timer_list *__timer)
             }
 
             if (attr_obj.end == '0') {
+                int steps = XO_ATTR_STEPS(xo_tlb->attr);
                 u32 rnd = get_random_u32();
                 attr &= ATTR_MSK;
                 attr = XO_SET_ATTR_AI_ALG(attr, rnd % XO_AI_TOT,
@@ -421,6 +449,10 @@ static void timer_handler(struct timer_list *__timer)
                 xo_tlb->attr = attr;
                 xo_tlb->table = 0;
                 xo_tlb->moves = 0;
+                fixed_point_t next = 0;
+                for (int j = steps - 1; j >= 0; j--)
+                    next = update_state_value(episode_moves[i][j], reward[i][j],
+                                              next, &rl_agents[winner]);
             }
 
             read_unlock(&attr_obj.lock);
@@ -544,6 +576,7 @@ static int __init kxo_init(void)
 {
     dev_t dev_id;
     int ret;
+    int state_sum = 1;
 
     if (kfifo_alloc(&rx_fifo, PAGE_SIZE, GFP_KERNEL) < 0)
         return -ENOMEM;
@@ -600,6 +633,9 @@ static int __init kxo_init(void)
 
     negamax_init();
     mcts_init();
+    CALC_STATE_NUM(state_sum);
+    init_rl_agent(&rl_agents[0], state_sum, CELL_O);
+    init_rl_agent(&rl_agents[1], state_sum, CELL_X);
     fill_win_patterns();
 
     for (int i = 0; i < N_GAMES; i++) {
@@ -661,6 +697,8 @@ static void __exit kxo_exit(void)
     class_destroy(kxo_class);
     cdev_del(&kxo_cdev);
     unregister_chrdev_region(dev_id, NR_KMLDRV);
+    for (size_t i = 0; i < ARRAY_SIZE(rl_agents); i++)
+        vfree(rl_agents[i].state_value);
 
     kfifo_free(&rx_fifo);
     pr_info("kxo: unloaded\n");

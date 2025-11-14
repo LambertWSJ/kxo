@@ -1,5 +1,5 @@
 TARGET = kxo
-kxo-objs = main.o game.o xoroshiro.o mcts.o negamax.o zobrist.o
+kxo-objs = main.o game.o xoroshiro.o mcts.o negamax.o zobrist.o reinforcement_learning.o
 obj-m := $(TARGET).o
 OBJS:=
 

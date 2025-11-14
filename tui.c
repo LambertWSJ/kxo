@@ -416,6 +416,7 @@ void update_table(const struct xo_table *xo_tlb)
     const char *ai_name[XO_AI_TOT] = {
         [XO_AI_MCTS] = "MCTS",
         [XO_AI_NEGAMAX] = "NEGA",
+        [XO_AI_RL] = "RL",
     };
     const char *cell_tlb[] = {" ", o_ch, x_ch};
     int id = XO_ATTR_ID(xo_tlb->attr);
@@ -490,7 +491,7 @@ void update_table(const struct xo_table *xo_tlb)
     }
 
     gotoxy(x + 12, y + 12);
-    outbuf_printf("%s vs %s\n", o_alg, x_alg);
+    outbuf_printf("%4s vs %-4s\n", o_alg, x_alg);
     outbuf_flush();
 }
 

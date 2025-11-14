@@ -57,14 +57,16 @@ struct xo_avg {
 enum {
     XO_AI_MCTS,
     XO_AI_NEGAMAX,
+    XO_AI_RL,
     XO_AI_TOT,
 };
 
 /* Self-defined fixed-point type, using last 10 bits as fractional bits,
  * starting from lsb */
-#define FIXED_SCALE_BITS 8
+#define FIXED_SCALE_BITS 16
 #define FIXED_MAX (~0U)
 #define FIXED_MIN (0U)
+#define RL_FIXED_1 (1 << FIXED_SCALE_BITS)
 #define GET_SIGN(x) ((x) & (1U << 31))
 #define SET_SIGN(x) ((x) | (1U << 31))
 #define CLR_SIGN(x) ((x) & ((1U << 31) - 1U))
