@@ -224,8 +224,8 @@ static void update_avg(int sig)
 
 void disable_raw()
 {
-    outbuf_flush();
     safe_write(STDOUT_FILENO, ALT_BUF_DISABLE, sizeof(ALT_BUF_DISABLE) - 1);
+    outbuf_flush();
     raw_mode_disable();
 }
 
