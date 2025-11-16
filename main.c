@@ -5,6 +5,7 @@
 #include <linux/circ_buf.h>
 #include <linux/interrupt.h>
 #include <linux/kfifo.h>
+#include <linux/kthread.h>
 #include <linux/module.h>
 #include <linux/random.h>
 #include <linux/sched/loadavg.h>
@@ -53,9 +54,12 @@ static struct xo_avg xo_avgs[N_GAMES];
 static ai_alg ai_algs[XO_AI_TOT] = {
     [XO_AI_MCTS] = mcts,
     [XO_AI_NEGAMAX] = negamax_predict,
+    [XO_AI_RL] = play_rl,
 };
 
-rl_agent_t rl_agents[2];
+static struct task_struct *rl_init_thr;
+static bool rl_inited;
+static DECLARE_COMPLETION(rl_comp);
 int episode_moves[N_GAMES][N_GRIDS] = {0};
 fixed_point_t reward[N_GAMES][N_GRIDS] = {0};
 
@@ -166,6 +170,18 @@ static void drawboard_work_func(struct work_struct *w)
     wake_up_interruptible(&rx_wait);
 }
 
+static int init_agents(void __attribute__((unused)) * arg)
+{
+    pr_debug("[%s] init...\n", __FUNCTION__);
+    int state_sum = 1;
+    CALC_STATE_NUM(state_sum);
+    init_rl_agent(state_sum, CELL_O);
+    init_rl_agent(state_sum, CELL_X);
+    pr_debug("[%s] init done!\n", __FUNCTION__);
+    WRITE_ONCE(rl_inited, true);
+    kthread_complete_and_exit(&rl_comp, 0);
+}
+
 static void ai_one_work_func(struct work_struct *w)
 {
     ktime_t tv_start, tv_end;
@@ -185,11 +201,10 @@ static void ai_one_work_func(struct work_struct *w)
     tv_start = ktime_get();
     mutex_lock(&game->lock);
     int move;
-    int alg = XO_ATTR_AI_ALG(attr) & 3;
-    bool is_rl = alg == XO_AI_RL;
-    WRITE_ONCE(move, is_rl ? play_rl(&table, &rl_agents[0])
-                           : ai_algs[alg](table, CELL_O));
-
+    int alg = (XO_ATTR_AI_ALG(attr) & (XO_AI_TOT - !rl_inited));
+    bool is_rl = alg == XO_AI_RL && rl_inited;
+    pr_debug("[two]: alg=%d, rl_init=%d\n", alg, rl_inited);
+    WRITE_ONCE(move, ai_algs[alg](table, CELL_O));
     smp_mb();
 
     if (move != -1) {
@@ -205,11 +220,11 @@ static void ai_one_work_func(struct work_struct *w)
             reward[id][steps] = score + calculate_win_value(win, CELL_O);
         }
         WRITE_ONCE(xo_tlb->attr, XO_SET_ATTR_STEPS(attr, steps + 1));
+        pr_debug("[one]move: [%d, %x, %lx]\n", steps, move, xo_tlb->moves);
     }
 
     WRITE_ONCE(game->turn, 'X');
     WRITE_ONCE(game->finish, 1);
-    pr_info("[one]move: [%d, %x, %lx]\n", steps, move, xo_tlb->moves);
     smp_wmb();
     mutex_unlock(&game->lock);
     tv_end = ktime_get();
@@ -244,11 +259,10 @@ static void ai_two_work_func(struct work_struct *w)
     tv_start = ktime_get();
     mutex_lock(&game->lock);
     int move;
-    int alg = XO_ATTR_AI_ALG(attr) >> 2;
-    bool is_rl = alg == XO_AI_RL;
-    WRITE_ONCE(move, is_rl ? play_rl(&table, &rl_agents[1])
-                           : ai_algs[alg](table, CELL_X));
-
+    int alg = ((XO_ATTR_AI_ALG(attr) >> 2) & (XO_AI_TOT - !rl_inited));
+    bool is_rl = alg == XO_AI_RL && rl_inited;
+    pr_debug("[two]: alg=%d, rl_init=%d\n", alg, rl_inited);
+    WRITE_ONCE(move, ai_algs[alg](table, CELL_X));
     smp_mb();
 
     if (move != -1) {
@@ -264,11 +278,11 @@ static void ai_two_work_func(struct work_struct *w)
             reward[id][steps] = score + calculate_win_value(win, CELL_X);
         }
         WRITE_ONCE(xo_tlb->attr, XO_SET_ATTR_STEPS(attr, steps + 1));
+        pr_debug("[two]move: [%d, %x, %lx]\n", steps, move, xo_tlb->moves);
     }
 
     WRITE_ONCE(game->turn, 'O');
     WRITE_ONCE(game->finish, 1);
-    pr_info("[two]move: [%d, %x, %lx]\n", steps, move, xo_tlb->moves);
     smp_wmb();
     mutex_unlock(&game->lock);
     tv_end = ktime_get();
@@ -444,15 +458,18 @@ static void timer_handler(struct timer_list *__timer)
                 int steps = XO_ATTR_STEPS(xo_tlb->attr);
                 u32 rnd = get_random_u32();
                 attr &= ATTR_MSK;
-                attr = XO_SET_ATTR_AI_ALG(attr, rnd % XO_AI_TOT,
-                                          (rnd >> 16) % XO_AI_TOT);
+                const int ai_tot = XO_AI_TOT - !rl_inited;
+                attr = XO_SET_ATTR_AI_ALG(attr, rnd % ai_tot,
+                                          (rnd >> 16) % ai_tot);
                 xo_tlb->attr = attr;
                 xo_tlb->table = 0;
                 xo_tlb->moves = 0;
-                fixed_point_t next = 0;
-                for (int j = steps - 1; j >= 0; j--)
-                    next = update_state_value(episode_moves[i][j], reward[i][j],
-                                              next, &rl_agents[winner]);
+                if (rl_inited) {
+                    fixed_point_t next = 0;
+                    for (int j = steps - 1; j >= 0; j--)
+                        next = update_state_value(episode_moves[i][j],
+                                                  reward[i][j], next, win);
+                }
             }
 
             read_unlock(&attr_obj.lock);
@@ -576,7 +593,6 @@ static int __init kxo_init(void)
 {
     dev_t dev_id;
     int ret;
-    int state_sum = 1;
 
     if (kfifo_alloc(&rx_fifo, PAGE_SIZE, GFP_KERNEL) < 0)
         return -ENOMEM;
@@ -633,19 +649,23 @@ static int __init kxo_init(void)
 
     negamax_init();
     mcts_init();
-    CALC_STATE_NUM(state_sum);
-    init_rl_agent(&rl_agents[0], state_sum, CELL_O);
-    init_rl_agent(&rl_agents[1], state_sum, CELL_X);
     fill_win_patterns();
 
+    rl_inited = false;
+    rl_init_thr = kthread_run(init_agents, NULL, "init_rl_agents");
+    if (IS_ERR(rl_init_thr)) {
+        ret = -ENOMEM;
+        goto error_kthread;
+    }
+    /* RL state space not yet init */
+    const int tot_alg = XO_AI_TOT - 1;
     for (int i = 0; i < N_GAMES; i++) {
         unsigned int attr;
         u32 rnd = get_random_u32();
         struct ai_game *game = &games[i];
         game->xo_tlb.table = 0;
         attr = i; /* set game ID in attr */
-        attr =
-            XO_SET_ATTR_AI_ALG(attr, rnd % XO_AI_TOT, (rnd >> 16) % XO_AI_TOT);
+        attr = XO_SET_ATTR_AI_ALG(attr, rnd % tot_alg, (rnd >> 16) % tot_alg);
         game->xo_tlb.attr = attr;
         game->turn = 'O';
         game->finish = 1;
@@ -668,6 +688,8 @@ static int __init kxo_init(void)
     pr_info("kxo: registered new kxo device: %d,%d\n", major, 0);
 out:
     return ret;
+error_kthread:
+    kthread_stop(rl_init_thr);
 error_workqueue:
     vfree(fast_buf.buf);
 error_vmalloc:
@@ -697,8 +719,9 @@ static void __exit kxo_exit(void)
     class_destroy(kxo_class);
     cdev_del(&kxo_cdev);
     unregister_chrdev_region(dev_id, NR_KMLDRV);
-    for (size_t i = 0; i < ARRAY_SIZE(rl_agents); i++)
-        vfree(rl_agents[i].state_value);
+    wait_for_completion(&rl_comp);
+    free_rl_agent(CELL_O);
+    free_rl_agent(CELL_X);
 
     kfifo_free(&rx_fifo);
     pr_info("kxo: unloaded\n");
