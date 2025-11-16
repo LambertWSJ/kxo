@@ -31,11 +31,13 @@ typedef struct td_agent {
 
 int table_to_hash(unsigned int table);
 
-unsigned int play_rl(unsigned int *table, const rl_agent_t *agent);
+int play_rl(unsigned int table, char player);
 
-void init_rl_agent(rl_agent_t *agent, unsigned int state_num, char player);
+void init_rl_agent(unsigned int state_num, char player);
+
+void free_rl_agent(unsigned char player);
 
 fixed_point_t update_state_value(int after_state_hash,
                                  fixed_point_t reward,
                                  fixed_point_t next,
-                                 rl_agent_t *agent);
+                                 char player);
