@@ -12,10 +12,12 @@ GIT_HOOKS := .git/hooks/applied
 LDFLAGS:=
 CFLAGS:=
 CFLAGS+=-g
+CFLAGS+=-I./neco
 
 OBJS:=
 OBJS+=xo-user.o
 OBJS+=tui.o
+OBJS+=./neco/neco.o
 
 all: kmod xo-user
 
@@ -27,7 +29,6 @@ xo-user: $(OBJS)
 
 %.o: %c
 	$(CC) $< $(CFLAGS) -c -o $@
-
 
 logo:
 	cat logo.txt | lolcat -f > logof.txt && cat ./logof.txt

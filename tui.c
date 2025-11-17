@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -36,7 +35,7 @@
 #define COLOR_GREEN "\033[32m"
 #define o_ch COLOR_GREEN "O" COLOR_RESET
 #define x_ch COLOR_RED "X" COLOR_RESET
-
+#define UNUSED __attribute__((unused))
 
 #define MIN_COLS 55
 #define MIN_ROWS 21
@@ -50,6 +49,10 @@
 #define BOARD_H 13
 #define BOARD_BASEY 10
 
+static void xo_record(const enum tui_tab tab, const struct xo_table *tlb);
+static void xo_loadavg(const enum tui_tab tab,
+                       const struct xo_table UNUSED *tlb);
+
 static struct {
     char buf[OUTBUF_SIZE];
     size_t len;
@@ -62,13 +65,14 @@ static int device_fd;
 struct xo_tab {
     char *title;
     int high;
+    void (*render)(const enum tui_tab tab, const struct xo_table *tlb);
 };
 
 enum tui_tab prev_tab = TAB_TOTLEN;
 
 static struct xo_tab tui_tabs[TAB_TOTLEN] = {
-    [XO_TAB_RECORD] = {.title = "Records", .high = 11},
-    [XO_TAB_LOADAVG] = {.title = "Load avg", .high = 10},
+    [XO_TAB_RECORD] = {.title = "Records", .high = 11, .render = xo_record},
+    [XO_TAB_LOADAVG] = {.title = "Load avg", .high = 10, .render = xo_loadavg},
 };
 
 static struct termios orig_termios;
@@ -217,11 +221,6 @@ static void gotoxy(int x, int y)
     outbuf_printf("\033[%d;%dH", y, x);
 }
 
-static void update_avg(int sig)
-{
-    ioctl(device_fd, XO_IO_LDAVG, xo_avgs);
-}
-
 void disable_raw()
 {
     safe_write(STDOUT_FILENO, ALT_BUF_DISABLE, sizeof(ALT_BUF_DISABLE) - 1);
@@ -239,17 +238,9 @@ void tui_init(const int fd)
 
     for (int i = 0; i < TAB_TOTLEN; i++)
         tab_maxh = max(tab_maxh, tui_tabs[i].high);
+
     memset(xo_avgs, 0, sizeof(xo_avgs));
-
     device_fd = fd;
-    signal(SIGALRM, update_avg);
-    struct itimerval timer;
-    timer.it_value.tv_sec = 0;
-    timer.it_value.tv_usec = 1;
-    timer.it_interval.tv_sec = 0;
-    timer.it_interval.tv_usec = 500000;
-    setitimer(ITIMER_REAL, &timer, NULL);
-
     atexit(disable_raw);
 }
 
@@ -551,13 +542,11 @@ static void xo_record(const enum tui_tab tab, const struct xo_table *tlb)
     }
 }
 
-static void xo_loadavg(const enum tui_tab tab, const struct xo_table *tlb)
+static void render_loadavg(const enum tui_tab tab)
 {
-    if (tab != prev_tab)
-        draw_tab_border(tab);
-    prev_tab = tab;
     int y = 52;
-
+    draw_tab_border(tab);
+    ioctl(device_fd, XO_IO_LDAVG, xo_avgs);
     gotoxy(17, y);
     outbuf_printf("Load avg 1min             %s                         %s",
                   o_ch, x_ch);
@@ -568,6 +557,30 @@ static void xo_loadavg(const enum tui_tab tab, const struct xo_table *tlb)
             (xo_avgs[i].avg_o & 0x780) >> 7, xo_avgs[i].avg_o & 0x7f,
             (xo_avgs[i].avg_x & 0x780) >> 7, xo_avgs[i].avg_x & 0x7f);
     }
+}
+
+static void xo_loadavg(const enum tui_tab tab,
+                       const struct xo_table UNUSED *tlb)
+{
+    static bool focus = false;
+    static struct timespec start;
+    struct timespec last;
+    if (tab != prev_tab) {
+        render_loadavg(tab);
+        clock_gettime(CLOCK_MONOTONIC, &start);
+    } else
+        focus = true;
+
+    prev_tab = tab;
+    clock_gettime(CLOCK_MONOTONIC, &last);
+    uint64_t delta = (last.tv_sec - start.tv_sec) +
+                     (last.tv_nsec - start.tv_nsec) / 1000000000;
+
+    if (focus && delta >= 1) {
+        render_loadavg(tab);
+        start = last;
+    }
+    focus = false;
 }
 
 static void draw_tab_label(enum tui_tab tab)
@@ -637,18 +650,7 @@ void tui_update_tab(enum tui_tab tab, const struct xo_table *tlb)
 {
     assert(tab < TAB_TOTLEN);
     draw_tab_label(tab);
-    /* request data and render */
-
-    switch (tab) {
-    case XO_TAB_RECORD:
-        xo_record(tab, tlb);
-        break;
-    case XO_TAB_LOADAVG:
-        xo_loadavg(tab, tlb);
-        break;
-    default:
-        assert(0);
-    }
+    tui_tabs[tab].render(tab, tlb);
 }
 
 void stop_message(bool stop)
