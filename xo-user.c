@@ -81,7 +81,7 @@ static void listen_keyboard_handler(enum tui_tab *tab)
             break;
         }
     }
-    stop_message(!read_attr);
+
     close(attr_fd);
 }
 
@@ -121,6 +121,7 @@ void task_io(int argc, void *argv[])
         restore_xy();
         tobj->tlb = xo_tlb;
     }
+    stop_message(!read_attr);
     neco_chan_send(chan, &tobj);
 }
 
