@@ -5,6 +5,7 @@
 #include "ai_game.h"
 #include "util.h"
 
+static struct mutex rl_locks[2];
 static u8 cells[] = {CELL_EMPTY, CELL_O, CELL_X};
 static rl_agent_t rl_agents[] = {
     [CELL_O - 1] = {.player = CELL_O},
@@ -39,6 +40,7 @@ int play_rl(unsigned int table, char player)
     const fixed_point_t *state_value = agent->state_value;
     int candidate_count = 1;
 
+    mutex_lock(&rl_locks[player - 1]);
     for_each_empty_grid(i, table)
     {
         table = VAL_SET_CELL(table, i, agent->player);
@@ -55,13 +57,14 @@ int play_rl(unsigned int table, char player)
         }
         table = VAL_SET_CELL(table, i, CELL_EMPTY);
     }
+    mutex_unlock(&rl_locks[player - 1]);
     return max_act;
 }
 
-fixed_point_t update_state_value(int after_state_hash,
-                                 fixed_point_t reward,
-                                 fixed_point_t next,
-                                 char player)
+static inline fixed_point_t step_update_state_value(int after_state_hash,
+                                                    fixed_point_t reward,
+                                                    fixed_point_t next,
+                                                    char player)
 {
     rl_agent_t *agent = &rl_agents[player - 1];
     fixed_point_t curr =
@@ -74,6 +77,19 @@ fixed_point_t update_state_value(int after_state_hash,
     return agent->state_value[after_state_hash];
 }
 
+void update_state_value(const int *after_state_hash,
+                        const fixed_point_t *reward,
+                        int steps,
+                        char player)
+{
+    mutex_lock(&rl_locks[player - 1]);
+    fixed_point_t next = 0;
+    for (int j = steps - 1; j >= 0; j--)
+        next = step_update_state_value(after_state_hash[j], reward[j], next,
+                                       player);
+    mutex_unlock(&rl_locks[player - 1]);
+}
+
 void free_rl_agent(unsigned char player)
 {
     vfree(rl_agents[player - 1].state_value);
@@ -82,6 +98,7 @@ void free_rl_agent(unsigned char player)
 void init_rl_agent(unsigned int state_num, char player)
 {
     rl_agent_t *agent = &rl_agents[player - 1];
+    mutex_init(&rl_locks[player - 1]);
     agent->state_value = vmalloc(sizeof(fixed_point_t) * state_num);
     if (!(agent->state_value))
         pr_info("Failed to allocate memory");
