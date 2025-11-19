@@ -37,7 +37,7 @@ void init_rl_agent(unsigned int state_num, char player);
 
 void free_rl_agent(unsigned char player);
 
-fixed_point_t update_state_value(int after_state_hash,
-                                 fixed_point_t reward,
-                                 fixed_point_t next,
-                                 char player);
+void update_state_value(const int *after_state_hash,
+                        const fixed_point_t *reward,
+                        int steps,
+                        char player);

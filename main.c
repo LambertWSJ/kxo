@@ -464,12 +464,8 @@ static void timer_handler(struct timer_list *__timer)
                 xo_tlb->attr = attr;
                 xo_tlb->table = 0;
                 xo_tlb->moves = 0;
-                if (rl_inited) {
-                    fixed_point_t next = 0;
-                    for (int j = steps - 1; j >= 0; j--)
-                        next = update_state_value(episode_moves[i][j],
-                                                  reward[i][j], next, win);
-                }
+                if (rl_inited)
+                    update_state_value(episode_moves[i], reward[i], steps, win);
             }
 
             read_unlock(&attr_obj.lock);
