@@ -178,6 +178,7 @@ static int init_agents(void __attribute__((unused)) * arg)
     init_rl_agent(state_sum, CELL_O);
     init_rl_agent(state_sum, CELL_X);
     pr_debug("[%s] init done!\n", __FUNCTION__);
+    smp_wmb();
     WRITE_ONCE(rl_inited, true);
     kthread_complete_and_exit(&rl_comp, 0);
 }
@@ -201,9 +202,9 @@ static void ai_one_work_func(struct work_struct *w)
     tv_start = ktime_get();
     mutex_lock(&game->lock);
     int move;
-    int alg = (XO_ATTR_AI_ALG(attr) & (XO_AI_TOT - !rl_inited));
+    int alg = (XO_ATTR_AI_ALG(attr) % (XO_AI_TOT - !rl_inited));
     bool is_rl = alg == XO_AI_RL && rl_inited;
-    pr_debug("[two]: alg=%d, rl_init=%d\n", alg, rl_inited);
+    pr_debug("[one]: id=%d, alg=%d, rl_init=%d\n", id, alg, rl_inited);
     WRITE_ONCE(move, ai_algs[alg](table, CELL_O));
     smp_mb();
 
@@ -259,9 +260,9 @@ static void ai_two_work_func(struct work_struct *w)
     tv_start = ktime_get();
     mutex_lock(&game->lock);
     int move;
-    int alg = ((XO_ATTR_AI_ALG(attr) >> 2) & (XO_AI_TOT - !rl_inited));
+    int alg = ((XO_ATTR_AI_ALG(attr) >> 2) % (XO_AI_TOT - !rl_inited));
     bool is_rl = alg == XO_AI_RL && rl_inited;
-    pr_debug("[two]: alg=%d, rl_init=%d\n", alg, rl_inited);
+    pr_debug("[two]: id=%d, alg=%d, rl_init=%d\n", id, alg, rl_inited);
     WRITE_ONCE(move, ai_algs[alg](table, CELL_X));
     smp_mb();
 
