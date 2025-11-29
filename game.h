@@ -6,7 +6,7 @@
 #define GOAL 3
 #define ALLOW_EXCEED 1
 #define N_GRIDS (BOARD_SIZE * BOARD_SIZE)
-#define N_GAMES 9
+#define N_GAMES 1
 #define GET_INDEX(i, j) ((i) * (BOARD_SIZE) + (j))
 #define GET_COL(x) ((x) % BOARD_SIZE)
 #define GET_ROW(x) ((x) / BOARD_SIZE)
@@ -66,7 +66,6 @@ enum {
 #define FIXED_SCALE_BITS 16
 #define FIXED_MAX (~0U)
 #define FIXED_MIN (0U)
-#define RL_FIXED_1 (1 << FIXED_SCALE_BITS)
 #define GET_SIGN(x) ((x) & (1U << 31))
 #define SET_SIGN(x) ((x) | (1U << 31))
 #define CLR_SIGN(x) ((x) & ((1U << 31) - 1U))
